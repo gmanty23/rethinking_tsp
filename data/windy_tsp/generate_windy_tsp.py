@@ -101,7 +101,7 @@ if __name__ == "__main__":
     np.random.seed(opts.seed)
     
     if opts.filename is None:
-        opts.filename = f"windy_tsp{opts.min_nodes}-{opts.max_nodes}_len{opts.num_samples}.pkl"
+        opts.filename = f"data/windy_tsp/windy_data/windy_tsp{opts.min_nodes}-{opts.max_nodes}_len{opts.num_samples}.pkl"
     
     os.makedirs(os.path.dirname(opts.filename) if os.path.dirname(opts.filename) else '.', exist_ok=True)
     

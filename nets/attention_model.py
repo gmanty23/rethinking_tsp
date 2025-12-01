@@ -57,6 +57,7 @@ class AttentionModel(nn.Module):
                  checkpoint_encoder=False,
                  shrink_size=None,
                  extra_logging=False,
+                 node_feature_type='coords',
                  *args, **kwargs):
         """
         Models with a GNN/Transformer/MLP encoder and the Autoregressive decoder using attention mechanism
@@ -108,6 +109,7 @@ class AttentionModel(nn.Module):
         
         # Extra logging updates self variables with batch statistics (without returning them)
         self.extra_logging = extra_logging
+        self.node_feature_type = node_feature_type # Store the type of node features used
         
         self.decode_type = None
         self.temp = 1.0
@@ -136,10 +138,16 @@ class AttentionModel(nn.Module):
                 self.project_node_step = nn.Linear(1, 3 * embedding_dim, bias=False)
         
         else:  # TSP
-            assert problem.NAME in ("tsp", "tspsl"), "Unsupported problem: {}".format(problem.NAME)
+            assert problem.NAME in ("tsp", "tspsl", "windy_tsp"), "Unsupported problem: {}".format(problem.NAME)
 
             step_context_dim = 2 * embedding_dim  # Embedding of first and last node
-            node_dim = 2  # x, y
+            # === NEW: Determine Input Dimension based on Feature Type ===
+            if self.node_feature_type == 'hybrid':
+                node_dim = 4  # [x, y, stat_out, stat_in]
+            elif self.node_feature_type == 'learned':
+                node_dim = 2  # [stat_out, stat_in]
+            else:
+                node_dim = 2  # [x, y] (Default/Coords)
 
             # Learned input symbols for first action
             self.W_placeholder = nn.Parameter(torch.Tensor(2 * embedding_dim))
@@ -174,7 +182,7 @@ class AttentionModel(nn.Module):
     def forward(self, nodes, graph, supervised=False, targets=None, class_weights=None, return_pi=False):
         """
         Args:
-            nodes: Input graph nodes (B x V x 2)
+            nodes: Input graph nodes (B x V x Features)
             graph: Graph as **NEGATIVE** adjacency matrices (B x V x V)
             supervised: Toggles SL training, teacher forcing and NLL loss computation
             targets: Targets for teacher forcing and NLL loss
@@ -294,6 +302,11 @@ class AttentionModel(nn.Module):
         return log_p.sum(1)
 
     def _init_embed(self, nodes):
+        """
+        Prepares the initial node embeddings.
+        Handles slicing of the input tensor based on node_feature_type.
+        """
+        # === VRP / OP / PCTSP Logic (Unchanged) ===
         if self.is_vrp or self.is_orienteering or self.is_pctsp:
             if self.is_vrp:
                 features = ('demand', )
@@ -313,7 +326,31 @@ class AttentionModel(nn.Module):
                 1
             )
         
-        return self.init_embed(nodes)
+        # === TSP Logic (Updated for Windy TSP) ===
+        # Input 'nodes' shape: (Batch, N, Channels)
+        # Channels 0-1: x, y
+        # Channels 2-4: wind_x, wind_y, alpha (Physics - not used for embedding)
+        # Channels 5-6: stat_out, stat_in (Learned stats)
+
+        # 1. Fallback for Standard TSP (2 Channels)
+        if nodes.size(-1) == 2:
+            return self.init_embed(nodes)
+
+        # 2. Windy TSP Slicing
+        if self.node_feature_type == 'learned':
+            # Use only Cost Statistics [stat_out, stat_in]
+            features = nodes[..., 5:7] 
+            
+        elif self.node_feature_type == 'hybrid':
+            # Use Coords + Cost Statistics [x, y, stat_out, stat_in]
+            features = torch.cat((nodes[..., 0:2], nodes[..., 5:7]), dim=-1)
+            
+        else:
+            # Default 'coords': Use only [x, y]
+            features = nodes[..., 0:2]
+
+        return self.init_embed(features)
+
 
     def _inner(self, nodes, graph, embeddings, supervised=False, targets=None):
         outputs = []
