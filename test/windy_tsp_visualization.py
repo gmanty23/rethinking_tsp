@@ -33,7 +33,8 @@ def calculate_cost_matrix(loc, wind, alpha):
 # 2. SCRIPT DE VISUALIZACIÓN (6 Gráficos)
 # ==========================================
 
-def visualize_windy_tsp():
+# MODIFICACIÓN: Añadido argumento 'save_path' por defecto
+def visualize_windy_tsp(save_path="windy_tsp_visualization.png"):
     # Configuración de parámetros para la demo
     N = 50
     ALPHA = 2.5      # Valor alto para que la curva se note bien
@@ -80,9 +81,6 @@ def visualize_windy_tsp():
 
     # -----------------------------------------------------------
     # GRÁFICO 2: La Curva Exponencial (Validación Física) 
-
-#[Image of Exponential decay graph]
-
     # -----------------------------------------------------------
     ax = axs[0, 1]
     # Aplanamos matrices excluyendo diagonal
@@ -182,9 +180,16 @@ def visualize_windy_tsp():
     ax.axvline(np.pi, color='red', linestyle='--')
     ax.legend(loc='upper right', fontsize='small')
 
-    # Finalizar
+    # Finalizar y Guardar
     plt.suptitle(f"Análisis de Generación Windy TSP (Exponencial)\nN={N}, Alpha={alpha}, |W|={np.linalg.norm(wind):.3f}", fontsize=16)
+    
+    # MODIFICACIÓN: Guardar la figura
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    print(f"Imagen guardada exitosamente en: {save_path}")
+    
+    # Mostrar en pantalla
     plt.show()
 
 if __name__ == "__main__":
-    visualize_windy_tsp()
+    # Se puede especificar el nombre del archivo aquí
+    visualize_windy_tsp("windy_tsp_results.png")
