@@ -10,7 +10,7 @@ def get_options(args=None):
 
     # Data
     parser.add_argument('--problem', default='tsp', 
-                        help="The problem to solve, default 'tsp', use 'tspsl' if Supervised Learning")
+                        help="The problem to solve, default 'tsp', use 'tspsl' if Supervised Learning, or 'windy_tsp' for Asymmetric/Windy TSP")
     parser.add_argument('--min_size', type=int, default=20, 
                         help="The minimum size of the problem graph")
     parser.add_argument('--max_size', type=int, default=50, 
@@ -64,6 +64,13 @@ def get_options(args=None):
                         help="Number of attention heads")
     parser.add_argument('--tanh_clipping', type=float, default=10., 
                         help='Clip the parameters to within +- this value using tanh. Set to 0 to not do clipping.')
+    
+    # --- NEW ARGUMENTS FOR WINDY TSP ---
+    parser.add_argument('--node_feature_type', type=str, default='coords', choices=['coords', 'learned', 'hybrid'],
+                        help="Feature type for Windy TSP: 'coords' (x,y), 'learned' (stats), or 'hybrid' (both).")
+    parser.add_argument('--gnn_direction_mode', type=str, default='forward', choices=['forward', 'backward', 'dual'],
+                        help="Directional aggregation for GNN: 'forward' (standard), 'backward' (outgoing), 'dual' (bi-directional).")
+    # -----------------------------------
 
     # Training
     parser.add_argument('--lr_model', type=float, default=1e-4, 

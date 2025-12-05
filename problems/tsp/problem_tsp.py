@@ -8,6 +8,8 @@ from scipy.spatial.distance import pdist, squareform
 
 from problems.tsp.state_tsp import StateTSP
 from utils.beam_search import beam_search
+# Import the generator logic locally
+from data.windy_tsp.generate_windy_tsp import generate_windy_instance
 
 
 def nearest_neighbor_graph(nodes, neighbors, knn_strat):
@@ -53,7 +55,7 @@ def tour_nodes_to_W(tour_nodes):
 
 
 class TSP(object):
-    """Class representing the Standar Symmetric Travelling Salesman Problem
+    """Class representing the Standard Symmetric Travelling Salesman Problem
     """
 
     NAME = 'tsp'
@@ -61,7 +63,7 @@ class TSP(object):
     @staticmethod
     def get_costs(dataset, pi):
         """Returns TSP tour length for given graph nodes and tour permutations
-
+        
         Args:
             dataset: graph nodes (torch.Tensor) [Batch, N, 2]
             pi: node permutations representing tours (torch.Tensor) [Batch, N]
@@ -78,7 +80,7 @@ class TSP(object):
         # Gather dataset in order of tour
         d = dataset.gather(1, pi.unsqueeze(-1).expand_as(dataset))
 
-        # Standars euclidean distance (L2 norm)
+        # Standard Euclidean Distance (L2 Norm)
         # Length is distance (L2-norm of difference) from each next location from its prev and of last from first
         return (d[:, 1:] - d[:, :-1]).norm(p=2, dim=2).sum(1) + (d[:, 0] - d[:, -1]).norm(p=2, dim=1), None
 
@@ -110,8 +112,8 @@ class TSP(object):
         )
 
         return beam_search(state, beam_size, propose_expansions)
-    
-   
+
+
 class WindyTSP(TSP):
     """
     Class representing the Windy (Asymmetric) TSP.
@@ -138,6 +140,13 @@ class WindyTSP(TSP):
         # 1. Gather dataset in order of tour
         d = dataset.gather(1, pi.unsqueeze(-1).expand_as(dataset))
 
+        # Check for correct data shape
+        if d.size(-1) == 2:
+            # Fallback for standard coords being passed to windy problem
+            # This happens if the baseline generator makes standard coords
+            # We calculate Euclidean cost to prevent crash
+            return (d[:, 1:] - d[:, :-1]).norm(p=2, dim=2).sum(1) + (d[:, 0] - d[:, -1]).norm(p=2, dim=1), None
+
         # 2. Extract Physics Variables (Indices 0 to 4)
         # Even if we added more features at the end (stats), the physics is always at the start.
         coords = d[..., :2]          # (Batch, N, 2)
@@ -145,6 +154,7 @@ class WindyTSP(TSP):
         alpha = d[..., 4:5]          # (Batch, N, 1)
 
         # 3. Prepare Segments (From -> To)
+        # We need the "next" node for every "current" node to form edges
         # Rolling -1 means index i aligns with i+1
         coords_next = torch.roll(coords, -1, dims=1)
 
@@ -153,10 +163,12 @@ class WindyTSP(TSP):
         dist = diff.norm(p=2, dim=2) # Euclidean Distance D_ij (Batch, N)
 
         # 5. Normalized Direction Unit Vectors
+        # Clamp distance to avoid division by zero
         dist_clamped = torch.clamp(dist, min=1e-8)
         u_hat = diff / dist_clamped.unsqueeze(-1)
 
         # 6. Project Wind onto Direction
+        # Dot product: (u_x * w_x) + (u_y * w_y)
         wind_proj = (u_hat * wind).sum(dim=-1) # (Batch, N)
 
         # 7. Apply Exponential Physics Formula
@@ -171,11 +183,16 @@ class WindyTSP(TSP):
 
         return total_cost, None
 
+    @staticmethod
+    def make_dataset(*args, **kwargs):
+        # INJECT THE FLAG: We tell the dataset "This is a Windy Problem"
+        kwargs['problem_type'] = 'windy_tsp'
+        return TSPDataset(*args, **kwargs)
+
 
 class TSPSL(TSP):
     """Class representing the Travelling Salesman Problem, trained with Supervised Learning
     """
-
     NAME = 'tspsl'
 
 
@@ -184,7 +201,8 @@ class TSPDataset(Dataset):
     def __init__(self, filename=None, min_size=20, max_size=50, batch_size=128,
                  num_samples=128000, offset=0, distribution=None, neighbors=20, 
                  knn_strat=None, supervised=False, nar=False, 
-                 node_feature_type='coords'): # New argument
+                 node_feature_type='coords',
+                 problem_type = 'tsp'): # New argument
         """Class representing a PyTorch dataset of TSP instances, which is fed to a dataloader
             Supports both Standard TSP (.txt) and Windy TSD (.pkl)
 
@@ -202,6 +220,7 @@ class TSPDataset(Dataset):
             nar: Flag to indicate Non-autoregressive decoding scheme, which uses edge-level groundtruth
             node_feature_type: 'coords', 'learned', or 'hybrid'. 
                                Controls what features are packed for the model.
+            problem_type: 'tsp' or 'windy_tsp'. Indicates the problem variant.
 
         Notes:
             `batch_size` is important to fix across dataset and dataloader,
@@ -223,6 +242,7 @@ class TSPDataset(Dataset):
         self.supervised = supervised
         self.nar = nar
         self.node_feature_type = node_feature_type
+        self.problem_type = problem_type # Store it
         
         # New flags for Windy TSP
         self.is_windy = False
@@ -254,13 +274,25 @@ class TSPDataset(Dataset):
                         tour_nodes = [int(node) - 1 for node in line[line.index('output') + 1:-1]][:-1]
                         self.tour_nodes.append(tour_nodes)
 
-        # === Random Generation (Standard TSP) ===
+        # === Random Generation ===
         else:
-            self.nodes_coords = []
-            print('\nGenerating {} samples of TSP{}-{}...'.format(num_samples, min_size, max_size))
-            for _ in tqdm(range(num_samples//batch_size), ascii=True):
-                num_nodes = np.random.randint(low=min_size, high=max_size+1)
-                self.nodes_coords += list(np.random.random([batch_size, num_nodes, 2]))
+            # Check problem_type OR feature type to decide generation mode
+            if self.problem_type == 'windy_tsp' or node_feature_type in ['learned', 'hybrid']:
+                self.is_windy = True
+                print(f'\nGenerating {num_samples} samples of Windy TSP{min_size}-{max_size}...')
+                self.wind_data = []
+                for _ in tqdm(range(num_samples), ascii=True):
+                    num_nodes = np.random.randint(low=min_size, high=max_size+1)
+                    # Generate with default alpha=2.0, max_wind=0.5
+                    instance = generate_windy_instance(num_nodes, alpha=2.0, max_wind=0.5)
+                    self.wind_data.append(instance)
+            else:
+                # Standard TSP Generation
+                self.nodes_coords = []
+                print('\nGenerating {} samples of TSP{}-{}...'.format(num_samples, min_size, max_size))
+                for _ in tqdm(range(num_samples//batch_size), ascii=True):
+                    num_nodes = np.random.randint(low=min_size, high=max_size+1)
+                    self.nodes_coords += list(np.random.random([batch_size, num_nodes, 2]))
         
         if self.is_windy:
             self.size = len(self.wind_data)
@@ -275,7 +307,7 @@ class TSPDataset(Dataset):
 
     def __getitem__(self, idx):
         if self.is_windy:
-            # === Windy TSP Feature Engineering ===
+            # === Windy TSP Packing ===
             data = self.wind_data[idx]
             loc = data['loc']     # (N, 2)
             wind = data['wind']   # (2,)
@@ -288,7 +320,6 @@ class TSPDataset(Dataset):
             alpha_repeated = np.full((num_nodes, 1), alpha)
             
             # 2. Statistics Calculation (For Model Features)
-            # We calculate the full cost matrix here to extract the topological clues
             # Calculate diffs
             diff = loc[None, :, :] - loc[:, None, :] # (N, N, 2)
             dists = np.linalg.norm(diff, axis=-1)
@@ -329,7 +360,7 @@ class TSPDataset(Dataset):
             }
             
         else:
-            # === Standard TSP ===
+            # === Standard TSP Packing ===
             nodes = self.nodes_coords[idx]
             item = {
                 'nodes': torch.FloatTensor(nodes),
@@ -342,3 +373,24 @@ class TSPDataset(Dataset):
                     item['tour_edges'] = torch.LongTensor(tour_nodes_to_W(tour_nodes))
 
             return item
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -58,6 +58,7 @@ class AttentionModel(nn.Module):
                  shrink_size=None,
                  extra_logging=False,
                  node_feature_type='coords',
+                 gnn_direction_mode='forward',
                  *args, **kwargs):
         """
         Models with a GNN/Transformer/MLP encoder and the Autoregressive decoder using attention mechanism
@@ -81,6 +82,8 @@ class AttentionModel(nn.Module):
             checkpoint_encoder: Whether to use checkpoints for encoder embeddings
             shrink_size: N/A
             extra_logging: Flag to perform extra logging, used for plotting histograms of embeddings
+            node_feature_type: Type of node features to use ('coords'/'learned'/'hybrid')
+            gnn_direction_mode: 'forward' (standard, in-only), 'backward' (out-only), or 'dual' (bi-directional)
 
         References:
             - W. Kool, H. van Hoof, and M. Welling. Attention, learn to solve routing problems! In International Conference on Learning Representations, 2019.
@@ -109,7 +112,8 @@ class AttentionModel(nn.Module):
         
         # Extra logging updates self variables with batch statistics (without returning them)
         self.extra_logging = extra_logging
-        self.node_feature_type = node_feature_type # Store the type of node features used
+        self.node_feature_type = node_feature_type
+        self.gnn_direction_mode = gnn_direction_mode
         
         self.decode_type = None
         self.temp = 1.0
@@ -137,11 +141,12 @@ class AttentionModel(nn.Module):
                 # Need to include the demand if split delivery allowed
                 self.project_node_step = nn.Linear(1, 3 * embedding_dim, bias=False)
         
-        else:  # TSP
+        else:  # TSP or WindyTSP
             assert problem.NAME in ("tsp", "tspsl", "windy_tsp"), "Unsupported problem: {}".format(problem.NAME)
 
             step_context_dim = 2 * embedding_dim  # Embedding of first and last node
-            # === NEW: Determine Input Dimension based on Feature Type ===
+            
+            # === Determine Input Dimension based on Feature Type ===
             if self.node_feature_type == 'hybrid':
                 node_dim = 4  # [x, y, stat_out, stat_in]
             elif self.node_feature_type == 'learned':
@@ -164,7 +169,8 @@ class AttentionModel(nn.Module):
                                            norm=normalization, 
                                            learn_norm=learn_norm,
                                            track_norm=track_norm,
-                                           gated=gated)
+                                           gated=gated,
+                                           gnn_direction_mode=gnn_direction_mode) 
 
         # For each node we compute (glimpse key, glimpse value, logit key) so 3 * embedding_dim
         self.project_node_embeddings = nn.Linear(embedding_dim, 3 * embedding_dim, bias=False)
@@ -302,11 +308,7 @@ class AttentionModel(nn.Module):
         return log_p.sum(1)
 
     def _init_embed(self, nodes):
-        """
-        Prepares the initial node embeddings.
-        Handles slicing of the input tensor based on node_feature_type.
-        """
-        # === VRP / OP / PCTSP Logic (Unchanged) ===
+        # VRP/OP/PCTSP logic
         if self.is_vrp or self.is_orienteering or self.is_pctsp:
             if self.is_vrp:
                 features = ('demand', )
@@ -326,31 +328,37 @@ class AttentionModel(nn.Module):
                 1
             )
         
-        # === TSP Logic (Updated for Windy TSP) ===
-        # Input 'nodes' shape: (Batch, N, Channels)
-        # Channels 0-1: x, y
-        # Channels 2-4: wind_x, wind_y, alpha (Physics - not used for embedding)
-        # Channels 5-6: stat_out, stat_in (Learned stats)
-
-        # 1. Fallback for Standard TSP (2 Channels)
+        # === TSP / Windy TSP ===
+        # 1. Slice based on feature type
         if nodes.size(-1) == 2:
-            return self.init_embed(nodes)
-
-        # 2. Windy TSP Slicing
-        if self.node_feature_type == 'learned':
-            # Use only Cost Statistics [stat_out, stat_in]
+            features = nodes 
+        elif self.node_feature_type == 'learned':
             features = nodes[..., 5:7] 
-            
         elif self.node_feature_type == 'hybrid':
-            # Use Coords + Cost Statistics [x, y, stat_out, stat_in]
             features = torch.cat((nodes[..., 0:2], nodes[..., 5:7]), dim=-1)
-            
-        else:
-            # Default 'coords': Use only [x, y]
+        else: # coords
             features = nodes[..., 0:2]
 
-        return self.init_embed(features)
-
+        # 2. Contiguous Fix & UNCONDITIONAL Sanitization
+        features = features.contiguous()
+        
+        # Force cleanup of NaNs/Infs without checking .any() first
+        # This prevents CUDA sync issues from skipping the fix
+        nan_mask = torch.isnan(features)
+        features[nan_mask] = 0.0
+        
+        inf_mask = torch.isinf(features)
+        features[inf_mask] = 0.0
+        
+        # 3. Reshape Trick
+        try:
+            b, n, f = features.size()
+            features_flat = features.view(-1, f) 
+            out_flat = self.init_embed(features_flat)
+            return out_flat.view(b, n, -1) 
+        except RuntimeError as e:
+            print(f"[CRASH LOG] Features stats - Min: {features.min()}, Max: {features.max()}, NaNs: {torch.isnan(features).any()}")
+            raise e
 
     def _inner(self, nodes, graph, embeddings, supervised=False, targets=None):
         outputs = []
@@ -660,3 +668,87 @@ class AttentionModel(nn.Module):
             .expand(v.size(0), v.size(1) if num_steps is None else num_steps, v.size(2), self.n_heads, -1)
             .permute(3, 0, 1, 2, 4)  # (n_heads, batch_size, num_steps, graph_size, head_dim)
         )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

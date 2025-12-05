@@ -1,1 +1,1 @@
-from problems.tsp.problem_tsp import TSP, TSPSL
+from problems.tsp.problem_tsp import TSP, TSPSL, WindyTSP

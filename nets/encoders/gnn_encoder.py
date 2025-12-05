@@ -18,7 +18,7 @@ class GNNLayer(nn.Module):
         - V. P. Dwivedi, C. K. Joshi, T. Laurent, Y. Bengio, and X. Bresson. Benchmarking graph neural networks. arXiv preprint arXiv:2003.00982, 2020.
     """
 
-    def __init__(self, hidden_dim, aggregation="sum", norm="batch", learn_norm=True, track_norm=False, gated=True):
+    def __init__(self, hidden_dim, aggregation="sum", norm="batch", learn_norm=True, track_norm=False, gated=True, gnn_direction_mode='forward'):
         """
         Args:
             hidden_dim: Hidden dimension size (int)
@@ -27,6 +27,8 @@ class GNNLayer(nn.Module):
             learn_norm: Whether the normalizer has learnable affine parameters (True/False)
             track_norm: Whether batch statistics are used to compute normalization mean/std (True/False)
             gated: Whether to use edge gating (True/False)
+            gnn_direction_mode: 'forward' (standard, in-only), 'backward' (out-only), or 'dual' (bi-directional)
+
         """
         super(GNNLayer, self).__init__()
         self.hidden_dim = hidden_dim
@@ -35,6 +37,8 @@ class GNNLayer(nn.Module):
         self.learn_norm = learn_norm
         self.track_norm = track_norm
         self.gated = gated
+        self.gnn_direction_mode = gnn_direction_mode
+
         assert self.gated, "Use gating with GCN, pass the `--gated` flag"
         
         self.U = nn.Linear(hidden_dim, hidden_dim, bias=True)
@@ -42,6 +46,10 @@ class GNNLayer(nn.Module):
         self.A = nn.Linear(hidden_dim, hidden_dim, bias=True)
         self.B = nn.Linear(hidden_dim, hidden_dim, bias=True)
         self.C = nn.Linear(hidden_dim, hidden_dim, bias=True)
+
+        # For Dual mode, we need a separate weight matrix for Out-Aggregation
+        if self.gnn_direction_mode == 'dual':
+            self.V_out = nn.Linear(hidden_dim, hidden_dim, bias=True)
 
         self.norm_h = {
             "layer": nn.LayerNorm(hidden_dim, elementwise_affine=learn_norm),
@@ -59,6 +67,7 @@ class GNNLayer(nn.Module):
             h: Input node features (B x V x H)
             e: Input edge features (B x V x V x H)
             graph: Graph adjacency matrices (B x V x V)
+                   0 indicates connection j->i, 1 indicates no connection.
         Returns: 
             Updated node and edge features
         """
@@ -68,7 +77,7 @@ class GNNLayer(nn.Module):
 
         # Linear transformations for node update
         Uh = self.U(h)  # B x V x H
-        Vh = self.V(h).unsqueeze(1).expand(-1, num_nodes, -1, -1)  # B x V x V x H
+        # Vh = self.V(h).unsqueeze(1).expand(-1, num_nodes, -1, -1)  # B x V x V x H
 
         # Linear transformations for edge update and gating
         Ah = self.A(h)  # B x V x H
@@ -79,8 +88,47 @@ class GNNLayer(nn.Module):
         e = Ah.unsqueeze(1) + Bh.unsqueeze(2) + Ce  # B x V x V x H
         gates = torch.sigmoid(e)  # B x V x V x H
 
+        # ===== Directional Aggregation Logic =====
+
+        # Helper to prepare Vh for aggregation: (B, V, V, H)
+        # Represents feature of 'j' available at 'i'
+        def prepare_Vh(linear_layer, h_input):
+            return linear_layer(h_input).unsqueeze(1).expand(-1, num_nodes, -1, -1)
+
+        if self.gnn_direction_mode == 'forward':
+            # Standard: Aggregate from j to i (Incoming)
+            # graph[b,i,j]=0 means edge j->i exists.
+            Vh = prepare_Vh(self.V, h)
+            aggr = self.aggregate(Vh, graph, gates)
+            
+        elif self.gnn_direction_mode == 'backward':
+            # Out-Only: Aggregate from j where i->j exists
+            # We transpose the graph so graph_T[b,i,j] = graph[b,j,i].
+            # If graph[b,j,i]=0 (edge i->j exists), then graph_T[b,i,j]=0.
+            # Effectively, we sum up features of our Successors.
+            Vh = prepare_Vh(self.V, h)
+            aggr = self.aggregate(Vh, graph.transpose(1, 2), gates.transpose(1, 2))
+            
+        elif self.gnn_direction_mode == 'dual':
+            # Bi-directional: Sum of Incoming (V) and Outgoing (V_out)
+            
+            # 1. Incoming (Standard)
+            Vh_in = prepare_Vh(self.V, h)
+            aggr_in = self.aggregate(Vh_in, graph, gates)
+            
+            # 2. Outgoing (Transposed)
+            # Note: We use the separate weight matrix V_out
+            Vh_out = prepare_Vh(self.V_out, h)
+            aggr_out = self.aggregate(Vh_out, graph.transpose(1, 2), gates.transpose(1, 2))
+            
+            aggr = aggr_in + aggr_out
+            
+        else:
+            raise ValueError(f"Unknown gnn_direction_mode: {self.gnn_direction_mode}")
+
+
         # Update node features
-        h = Uh + self.aggregate(Vh, graph, gates)  # B x V x H
+        h = Uh + aggr  # B x V x H
 
         # Normalize node features
         h = self.norm_h(
@@ -115,6 +163,7 @@ class GNNLayer(nn.Module):
         Vh = gates * Vh  # B x V x V x H
         
         # Enforce graph structure through masking
+        # graph has 1s where there are NO edges, so we zero those out
         Vh[graph.unsqueeze(-1).expand_as(Vh)] = 0
         
         if self.aggregation == "mean":
@@ -132,13 +181,13 @@ class GNNEncoder(nn.Module):
     """
     
     def __init__(self, n_layers, hidden_dim, aggregation="sum", norm="layer", 
-                 learn_norm=True, track_norm=False, gated=True, *args, **kwargs):
+                 learn_norm=True, track_norm=False, gated=True, gnn_direction_mode = 'forward', *args, **kwargs):
         super(GNNEncoder, self).__init__()
 
         self.init_embed_edges = nn.Embedding(2, hidden_dim)
 
         self.layers = nn.ModuleList([
-            GNNLayer(hidden_dim, aggregation, norm, learn_norm, track_norm, gated)
+            GNNLayer(hidden_dim, aggregation, norm, learn_norm, track_norm, gated, gnn_direction_mode)
                 for _ in range(n_layers)
         ])
 
