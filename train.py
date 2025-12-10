@@ -90,7 +90,7 @@ def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_datasets, p
     start_time = time.time()
 
     if not opts.no_tensorboard:
-        tb_logger.log_value('learnrate_pg0', optimizer.param_groups[0]['lr'], step)
+        tb_logger.add_scalar('learnrate_pg0', optimizer.param_groups[0]['lr'], step)
 
     # Generate new training data for each epoch
     train_dataset = baseline.wrap_dataset(
@@ -144,8 +144,8 @@ def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_datasets, p
     for val_idx, val_dataset in enumerate(val_datasets):
         avg_reward, avg_opt_gap = validate(model, val_dataset, problem, opts)
         if not opts.no_tensorboard:
-            tb_logger.log_value('val{}/avg_reward'.format(val_idx+1), avg_reward, step)
-            tb_logger.log_value('val{}/opt_gap'.format(val_idx+1), avg_opt_gap, step)
+            tb_logger.add_scalar('val{}/avg_reward'.format(val_idx+1), avg_reward, step)
+            tb_logger.add_scalar('val{}/opt_gap'.format(val_idx+1), avg_opt_gap, step)
 
     baseline.epoch_callback(model, epoch)
 
@@ -196,7 +196,7 @@ def train_epoch_sl(model, optimizer, lr_scheduler, epoch, train_dataset, val_dat
     start_time = time.time()
 
     if not opts.no_tensorboard:
-        tb_logger.log_value('learnrate_pg0', optimizer.param_groups[0]['lr'], step)
+        tb_logger.add_scalar('learnrate_pg0', optimizer.param_groups[0]['lr'], step)
 
     # Create data loader with random sampling
     train_dataloader = DataLoader(train_dataset, batch_size=opts.batch_size, num_workers=opts.num_workers, 
@@ -242,8 +242,8 @@ def train_epoch_sl(model, optimizer, lr_scheduler, epoch, train_dataset, val_dat
     for val_idx, val_dataset in enumerate(val_datasets):
         avg_reward, avg_opt_gap = validate(model, val_dataset, problem, opts)
         if not opts.no_tensorboard:
-            tb_logger.log_value('val{}/avg_reward'.format(val_idx+1), avg_reward, step)
-            tb_logger.log_value('val{}/opt_gap'.format(val_idx+1), avg_opt_gap, step)
+            tb_logger.add_scalar('val{}/avg_reward'.format(val_idx+1), avg_reward, step)
+            tb_logger.add_scalar('val{}/opt_gap'.format(val_idx+1), avg_opt_gap, step)
     
 
 def train_batch_sl(model, optimizer, epoch, batch_id, 

@@ -27,7 +27,7 @@ from problems.tsp.problem_tsp import TSP
 from utils import *
 from train import *
 
-from tensorboard_logger import Logger as TbLogger
+from torch.utils.tensorboard import SummaryWriter as TbLogger
 
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -88,18 +88,18 @@ def log_values_ft(cost, grad_norms, epoch, batch_id, step, log_likelihood,
 
     # Log values to tensorboard
     if not opts.no_tensorboard:
-        tb_logger.log_value('avg_cost/ft', avg_cost, step)
+        tb_logger.add_scalar('avg_cost/ft', avg_cost, step)
 
-        tb_logger.log_value('actor_loss/ft', reinforce_loss.item(), step)
-        tb_logger.log_value('nll/ft', -log_likelihood.mean().item(), step)
+        tb_logger.add_scalar('actor_loss/ft', reinforce_loss.item(), step)
+        tb_logger.add_scalar('nll/ft', -log_likelihood.mean().item(), step)
 
-        tb_logger.log_value('grad_norm/ft', grad_norms[0], step)
-        tb_logger.log_value('grad_norm_clipped/ft', grad_norms_clipped[0], step)
+        tb_logger.add_scalar('grad_norm/ft', grad_norms[0], step)
+        tb_logger.add_scalar('grad_norm_clipped/ft', grad_norms_clipped[0], step)
 
         if opts.baseline == 'critic':
-            tb_logger.log_value('critic_loss/ft', bl_loss.item(), step)
-            tb_logger.log_value('critic_grad_norm/ft', grad_norms[1], step)
-            tb_logger.log_value('critic_grad_norm_clipped/ft', grad_norms_clipped[1], step)
+            tb_logger.add_scalar('critic_loss/ft', bl_loss.item(), step)
+            tb_logger.add_scalar('critic_grad_norm/ft', grad_norms[1], step)
+            tb_logger.add_scalar('critic_grad_norm_clipped/ft', grad_norms_clipped[1], step)
 
 
 if __name__ == "__main__":
@@ -323,8 +323,8 @@ if __name__ == "__main__":
         neighbors=opts.neighbors, knn_strat=opts.knn_strat, supervised=True
     )
     avg_reward, avg_opt_gap = validate(model, val_dataset, problem, opts)
-    tb_logger.log_value('val_ft/avg_reward', avg_reward, step)
-    tb_logger.log_value('val_ft/opt_gap', avg_opt_gap, step)
+    tb_logger.add_scalar('val_ft/avg_reward', avg_reward, step)
+    tb_logger.add_scalar('val_ft/opt_gap', avg_opt_gap, step)
 
     if opts.ft_strategy == "active":
         # Active search: finetune on the test set
@@ -386,8 +386,8 @@ if __name__ == "__main__":
         if epoch % opts.val_every == 0:
             # Evaluate on held-out set
             avg_reward, avg_opt_gap = validate(model, val_dataset, problem, opts)  
-            tb_logger.log_value('val_ft/avg_reward', avg_reward, step)
-            tb_logger.log_value('val_ft/opt_gap', avg_opt_gap, step)
+            tb_logger.add_scalar('val_ft/avg_reward', avg_reward, step)
+            tb_logger.add_scalar('val_ft/opt_gap', avg_opt_gap, step)
 
         baseline.epoch_callback(model, epoch)
 

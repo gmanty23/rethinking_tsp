@@ -33,7 +33,7 @@ class AttentionModelFixed(NamedTuple):
                 glimpse_val=self.glimpse_val[:, key],  # dim 0 are the heads
                 logit_key=self.logit_key[key]
             )
-        return super(AttentionModelFixed, self).__getitem__(key)
+        return tuple.__getitem__(self, key)
 
 
 class AttentionModel(nn.Module):
@@ -449,7 +449,7 @@ class AttentionModel(nn.Module):
 
             # Check if sampling went OK, can go wrong due to bug on GPU
             # See https://discuss.pytorch.org/t/bad-behavior-of-multinomial-function/10232
-            while mask.gather(1, selected.unsqueeze(-1)).data.any():
+            while mask.gather(1, selected.unsqueeze(-1)).bool().any():
                 print('Sampled bad values, resampling!')
                 selected = probs.multinomial(1).squeeze(1)
 
@@ -615,7 +615,7 @@ class AttentionModel(nn.Module):
         compatibility = torch.matmul(glimpse_Q, glimpse_K.transpose(-2, -1)) / math.sqrt(glimpse_Q.size(-1))
         if self.mask_inner:
             assert self.mask_logits, "Cannot mask inner without masking logits"
-            compatibility[mask[None, :, :, None, :].expand_as(compatibility)] = -1e10
+            compatibility[mask.bool()[None, :, :, None, :].expand_as(compatibility)] = -1e10
             if self.mask_graph:
                 compatibility[graph_mask[None, :, :, None, :].expand_as(compatibility)] = -1e10
 
@@ -639,7 +639,7 @@ class AttentionModel(nn.Module):
         if self.tanh_clipping > 0:
             logits = torch.tanh(logits) * self.tanh_clipping
         if self.mask_logits:
-            logits[mask] = -1e10
+            logits[mask.bool()] = -1e10
 
         return logits, glimpse.squeeze(-2)
 

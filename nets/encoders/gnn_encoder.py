@@ -164,7 +164,7 @@ class GNNLayer(nn.Module):
         
         # Enforce graph structure through masking
         # graph has 1s where there are NO edges, so we zero those out
-        Vh[graph.unsqueeze(-1).expand_as(Vh)] = 0
+        Vh[graph.unsqueeze(-1).expand_as(Vh).bool()] = 0
         
         if self.aggregation == "mean":
             return torch.sum(Vh, dim=2) / torch.sum(1-graph, dim=2).unsqueeze(-1).type_as(Vh)

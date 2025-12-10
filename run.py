@@ -7,7 +7,7 @@ import numpy as np
 
 import torch
 import torch.optim as optim
-from tensorboard_logger import Logger as TbLogger
+from torch.utils.tensorboard import SummaryWriter as TbLogger
 
 from options import get_options
 from train import train_epoch, train_epoch_sl, validate, get_inner_model
