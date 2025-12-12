@@ -29,17 +29,29 @@ def validate(model, dataset, problem, opts):
     # Validate
     print(f'\nValidating on {dataset.size} samples from {dataset.filename}...')
     cost = rollout(model, dataset, opts)
-    gt_cost = rollout_groundtruth(problem, dataset, opts)
-    opt_gap = ((cost/gt_cost - 1) * 100)
     
-    print('Validation groundtruth cost: {:.3f} +- {:.3f}'.format(
-        gt_cost.mean(), torch.std(gt_cost)))
-    print('Validation average cost: {:.3f} +- {:.3f}'.format(
-        cost.mean(), torch.std(cost)))
-    print('Validation optimality gap: {:.3f}% +- {:.3f}'.format(
-        opt_gap.mean(), torch.std(opt_gap)))
+    # SAFEGUARD: Try to calculate Optimality Gap, but skip if ground truth is missing
+    try:
+        gt_cost = rollout_groundtruth(problem, dataset, opts)
+        opt_gap = ((cost/gt_cost - 1) * 100)
+        
+        print('Validation groundtruth cost: {:.3f} +- {:.3f}'.format(
+            gt_cost.mean(), torch.std(gt_cost)))
+        print('Validation average cost: {:.3f} +- {:.3f}'.format(
+            cost.mean(), torch.std(cost)))
+        print('Validation optimality gap: {:.3f}% +- {:.3f}'.format(
+            opt_gap.mean(), torch.std(opt_gap)))
+            
+        return cost.mean(), opt_gap.mean()
 
-    return cost.mean(), opt_gap.mean()
+    except KeyError:
+        # Ground truth not found (e.g. Windy TSP), just report average cost
+        print('Validation average cost: {:.3f} +- {:.3f}'.format(
+            cost.mean(), torch.std(cost)))
+        print('Validation groundtruth cost: N/A')
+        print('Validation optimality gap: N/A')
+        
+        return cost.mean(), 0  # Return 0 gap as placeholder
 
 
 def rollout(model, dataset, opts):

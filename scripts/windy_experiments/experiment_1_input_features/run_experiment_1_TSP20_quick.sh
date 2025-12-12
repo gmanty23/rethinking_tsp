@@ -1,21 +1,15 @@
 #!/bin/bash
 
-# Experiment 1: Information Study
-# Comparing node_feature_types: coords vs learned vs hybrid
+# Experiment 1: Information Study (QUICK TEST)
 
 # --- CONFIGURATION ---
-EPOCHS=100
+EPOCHS=5  # Reduced from 50 to 5
 BATCH_SIZE=128
 PROBLEM="windy_tsp"
 TRAIN_DATA="data/windy_tsp/windy_tsp20_train.pkl"
 VAL_DATA="data/windy_tsp/windy_tsp20_val.pkl"
 
-# Explicitly set size to 20 so output folders are named correctly
 GRAPH_SIZE=20 
-
-# FIX: Set sizes that are multiples of 128 (BATCH_SIZE)
-# 1280 / 128 = 10 batches
-# 10240 / 128 = 80 batches
 VAL_SIZE=1280
 ROLLOUT_SIZE=10240
 
@@ -25,7 +19,7 @@ ARGS="--problem $PROBLEM \
       --max_size $GRAPH_SIZE \
       --n_epochs $EPOCHS \
       --batch_size $BATCH_SIZE \
-      --epoch_size 1280000 \
+      --epoch_size 12800 \
       --train_dataset $TRAIN_DATA \
       --val_datasets $VAL_DATA \
       --val_size $VAL_SIZE \
@@ -34,24 +28,25 @@ ARGS="--problem $PROBLEM \
       --encoder gnn \
       --gated \
       --gnn_direction_mode forward \
-      --normalization layer"
+      --normalization layer \
+      --no_progress_bar" # Keep this to reduce spam, but check logs
 
-# 1. Baseline: Standard Coordinates (Blind to Wind)
+# 1. Baseline: Standard Coordinates
 echo "Starting Run A: Coords (Baseline)..."
 python run.py $ARGS \
     --node_feature_type coords \
-    --run_name "exp1_coords"
+    --run_name "test_coords_5ep"
 
-# 2. Topological: Learned Stats Only (Blind to Geometry)
+# 2. Topological: Learned Stats Only
 echo "Starting Run B: Learned (Topological)..."
 python run.py $ARGS \
     --node_feature_type learned \
-    --run_name "exp1_learned"
+    --run_name "test_learned_5ep"
 
 # 3. Hybrid: The Proposed Solution
 echo "Starting Run C: Hybrid (Geometry + Physics)..."
 python run.py $ARGS \
     --node_feature_type hybrid \
-    --run_name "exp1_hybrid"
+    --run_name "test_hybrid_5ep"
 
-echo "Experiment 1 Complete."
+echo "Quick Test Complete. Check TensorBoard."

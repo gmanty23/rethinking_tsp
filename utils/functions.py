@@ -112,40 +112,45 @@ def load_model(path, epoch=None, extra_logging=False):
 
     problem = load_problem(args['problem'])
     
-    if args.get('model', 'attention') == 'attention':
-        # UPDATE: We must pass the new WindyTSP arguments to the constructor
-        # using .get() with defaults to maintain backward compatibility for old TSP models.
-        model = AttentionModel(
-            problem,
-            embedding_dim=args['embedding_dim'],
-            hidden_dim=args['hidden_dim'],
-            n_encode_layers=args['n_encode_layers'],
-            mask_inner=True,
-            mask_logits=True,
-            normalization=args['normalization'],
-            tanh_clipping=args['tanh_clipping'],
-            checkpoint_encoder=args.get('checkpoint_encoder', False),
-            shrink_size=args.get('shrink_size', None),
-            encoder_class=GNNEncoder if args.get('encoder', 'gnn') == 'gnn' else None, # Simplified logic, assumes GNN usually
-            
-            # --- New Arguments passed from saved args.json ---
-            node_feature_type=args.get('node_feature_type', 'coords'),
-            gnn_direction_mode=args.get('gnn_direction_mode', 'forward')
-        )
-    else:
-        # NAR Model (not modified for WindyTSP)
-        model = NARModel(
-            problem,
-            embedding_dim=args['embedding_dim'],
-            hidden_dim=args['hidden_dim'],
-            n_encode_layers=args['n_encode_layers'],
-            mask_inner=True,
-            mask_logits=True,
-            normalization=args['normalization'],
-            tanh_clipping=args['tanh_clipping'],
-            checkpoint_encoder=args.get('checkpoint_encoder', False),
-            shrink_size=args.get('shrink_size', None)
-        )
+    model_class = {
+        'attention': AttentionModel,
+        'nar': NARModel,
+    }.get(args.get('model', 'attention'), None)
+    assert model_class is not None, "Unknown model: {}".format(model_class)
+    encoder_class = {
+        'gnn': GNNEncoder,
+        'gat': GraphAttentionEncoder,
+        'mlp': MLPEncoder
+    }.get(args.get('encoder', 'gnn'), None)
+    assert encoder_class is not None, "Unknown encoder: {}".format(encoder_class)
+    
+    model = model_class(
+        problem=problem,
+        embedding_dim=args['embedding_dim'],
+        encoder_class=encoder_class,
+        n_encode_layers=args['n_encode_layers'],
+        aggregation=args['aggregation'],
+        aggregation_graph=args['aggregation_graph'],
+        normalization=args['normalization'],
+        learn_norm=args['learn_norm'],
+        track_norm=args['track_norm'],
+        gated=args['gated'],
+        n_heads=args['n_heads'],
+        tanh_clipping=args['tanh_clipping'],
+        mask_inner=True,
+        mask_logits=True,
+        mask_graph=False,
+        checkpoint_encoder=args['checkpoint_encoder'],
+        shrink_size=args['shrink_size'],
+        extra_logging=extra_logging,
+        
+        # Restore Windy TSP arguments from saved args.json
+        node_feature_type=args.get('node_feature_type', 'coords'),
+        gnn_direction_mode=args.get('gnn_direction_mode', 'forward')
+    )    
+    
+
+
     # Overwrite model parameters by parameters to load
     load_data = torch_load_cpu(model_filename)
     model.load_state_dict({**model.state_dict(), **load_data.get('model', {})})

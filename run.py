@@ -100,7 +100,9 @@ def _run_rl(opts):
         mask_logits=True,
         mask_graph=False,
         checkpoint_encoder=opts.checkpoint_encoder,
-        shrink_size=opts.shrink_size
+        shrink_size=opts.shrink_size,
+        node_feature_type=opts.node_feature_type,
+        gnn_direction_mode=opts.gnn_direction_mode
     ).to(opts.device)
 
     if opts.use_cuda and torch.cuda.device_count() > 1:
@@ -186,7 +188,8 @@ def _run_rl(opts):
         val_datasets.append(
             problem.make_dataset(
                 filename=val_filename, batch_size=opts.batch_size, num_samples=opts.val_size, 
-                neighbors=opts.neighbors, knn_strat=opts.knn_strat, supervised=True, nar=False
+                neighbors=opts.neighbors, knn_strat=opts.knn_strat, supervised=True, nar=False,
+                node_feature_type=opts.node_feature_type
             ))
 
     if opts.resume:
@@ -281,7 +284,9 @@ def _run_sl(opts):
         mask_logits=True,
         mask_graph=False,
         checkpoint_encoder=opts.checkpoint_encoder,
-        shrink_size=opts.shrink_size
+        shrink_size=opts.shrink_size,
+        node_feature_type=opts.node_feature_type,
+        gnn_direction_mode=opts.gnn_direction_mode
     ).to(opts.device)
 
     if opts.use_cuda and torch.cuda.device_count() > 1:
@@ -315,7 +320,8 @@ def _run_sl(opts):
     # Load/generate datasets
     train_dataset = problem.make_dataset(
         filename=opts.train_dataset, batch_size=opts.batch_size, num_samples=opts.epoch_size, 
-        neighbors=opts.neighbors, knn_strat=opts.knn_strat, supervised=True, nar=(opts.model == 'nar')
+        neighbors=opts.neighbors, knn_strat=opts.knn_strat, supervised=True, nar=(opts.model == 'nar'),
+        node_feature_type=opts.node_feature_type
     )
     opts.epoch_size = train_dataset.size  # Training set size might be different from specified epoch size
     val_datasets = []
@@ -323,7 +329,8 @@ def _run_sl(opts):
         val_datasets.append(
             problem.make_dataset(
                 filename=val_filename, batch_size=opts.batch_size, num_samples=opts.val_size, 
-                neighbors=opts.neighbors, knn_strat=opts.knn_strat, supervised=True, nar=False
+                neighbors=opts.neighbors, knn_strat=opts.knn_strat, supervised=True, nar=False,
+                node_feature_type=opts.node_feature_type
             ))
 
     if opts.resume:
