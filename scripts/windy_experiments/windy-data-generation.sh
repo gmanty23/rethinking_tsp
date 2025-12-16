@@ -9,7 +9,7 @@ python data/windy_tsp/generate_windy_tsp.py \
     --max_nodes 20 \
     --num_samples 10000 \
     --filename data/windy_tsp/windy_tsp20_val.pkl \
-    --alpha 2.0 \
+    --alpha 5.0 \
     --max_wind 0.5 \
     --seed 1234
 
@@ -19,7 +19,7 @@ python data/windy_tsp/generate_windy_tsp.py \
     --max_nodes 20 \
     --num_samples 128000 \
     --filename data/windy_tsp/windy_tsp20_train.pkl \
-    --alpha 2.0 \
+    --alpha 5.0 \
     --max_wind 0.5 \
     --seed 4321
 
