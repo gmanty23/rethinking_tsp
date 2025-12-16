@@ -277,7 +277,7 @@ class TSPDataset(Dataset):
         # === Random Generation ===
         else:
             # Check problem_type OR feature type to decide generation mode
-            if self.problem_type == 'windy_tsp' or node_feature_type in ['learned', 'hybrid']:
+            if self.problem_type == 'windy_tsp' or node_feature_type in ['learned', 'hybrid', 'blank']:
                 self.is_windy = True
                 print(f'\nGenerating {num_samples} samples of Windy TSP{min_size}-{max_size}...')
                 self.wind_data = []
@@ -334,6 +334,8 @@ class TSPDataset(Dataset):
             # Asymmetric Costs
             costs = dists * np.exp(-1.0 * alpha * wind_proj)
             np.fill_diagonal(costs, 0)
+
+            norm_costs = costs / (costs.max() + 1e-6)
             
             # Extract Stats
             # Mean Outgoing Cost (Row Mean)
@@ -356,7 +358,8 @@ class TSPDataset(Dataset):
             
             return {
                 'nodes': torch.FloatTensor(nodes_feature),
-                'graph': torch.ByteTensor(nearest_neighbor_graph(loc, self.neighbors, self.knn_strat))
+                'graph': torch.ByteTensor(nearest_neighbor_graph(loc, self.neighbors, self.knn_strat)),
+                'cost_matrix': torch.FloatTensor(norm_costs)
             }
             
         else:

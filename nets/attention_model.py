@@ -82,7 +82,7 @@ class AttentionModel(nn.Module):
             checkpoint_encoder: Whether to use checkpoints for encoder embeddings
             shrink_size: N/A
             extra_logging: Flag to perform extra logging, used for plotting histograms of embeddings
-            node_feature_type: Type of node features to use ('coords'/'learned'/'hybrid')
+            node_feature_type: Type of node features to use ('coords'/'learned'/'hybrid'/'blank')
             gnn_direction_mode: 'forward' (standard, in-only), 'backward' (out-only), or 'dual' (bi-directional)
 
         References:
@@ -144,23 +144,33 @@ class AttentionModel(nn.Module):
         else:  # TSP or WindyTSP
             assert problem.NAME in ("tsp", "tspsl", "windy_tsp"), "Unsupported problem: {}".format(problem.NAME)
 
-            step_context_dim = 2 * embedding_dim  # Embedding of first and last node
+            step_context_dim = 2 * embedding_dim
             
-            # === Determine Input Dimension based on Feature Type ===
+            # === FEATURE DIMENSION LOGIC ===
             if self.node_feature_type == 'hybrid':
-                node_dim = 4  # [x, y, stat_out, stat_in]
+                node_dim = 4
             elif self.node_feature_type == 'learned':
-                node_dim = 2  # [stat_out, stat_in]
+                node_dim = 2
+            elif self.node_feature_type == 'coords':
+                node_dim = 2
             else:
-                node_dim = 2  # [x, y] (Default/Coords)
+                # For 'blank' mode, node_dim is irrelevant for the Linear layer
+                node_dim = 0
 
             # Learned input symbols for first action
             self.W_placeholder = nn.Parameter(torch.Tensor(2 * embedding_dim))
             self.W_placeholder.data.uniform_(-1, 1)  # Placeholder should be in range of activations
         
-        # Input embedding layer
-        self.init_embed = nn.Linear(node_dim, embedding_dim, bias=True)        
-        
+        # === INPUT EMBEDDING LAYER ===
+        if self.node_feature_type == 'blank':
+            # Case D: Blank (Learnable Parameter)
+            # We create a single learnable vector instead of a projection layer
+            self.init_embed_blank = nn.Parameter(torch.Tensor(1, 1, embedding_dim))
+            self.init_embed_blank.data.uniform_(-1, 1)
+        else:
+            # Case A, B, C: Project features (coords/learned/hybrid)
+            self.init_embed = nn.Linear(node_dim, embedding_dim, bias=True)
+
         # Encoder model
         self.embedder = self.encoder_class(n_layers=n_encode_layers, 
                                            n_heads=n_heads,
@@ -185,7 +195,7 @@ class AttentionModel(nn.Module):
         if temp is not None:  # Do not change temperature if not provided
             self.temp = temp
 
-    def forward(self, nodes, graph, supervised=False, targets=None, class_weights=None, return_pi=False):
+    def forward(self, nodes, graph, cost_matrix=None, supervised=False, targets=None, class_weights=None, return_pi=False):
         """
         Args:
             nodes: Input graph nodes (B x V x Features)
@@ -196,11 +206,12 @@ class AttentionModel(nn.Module):
                        (Not compatible with DataParallel as the results
                         may be of different lengths on different GPUs)
         """
-        # Embed input batch of graph using GNN (B x V x H)
+        # Embed input batch
         if self.checkpoint_encoder:
-            embeddings = checkpoint(self.embedder, self._init_embed(nodes), graph)
+            # Pass cost_matrix to the embedder (GNNEncoder)
+            embeddings = checkpoint(self.embedder, self._init_embed(nodes), graph, cost_matrix)
         else:
-            embeddings = self.embedder(self._init_embed(nodes), graph)
+            embeddings = self.embedder(self._init_embed(nodes), graph, cost_matrix=cost_matrix)
         
         if self.extra_logging:
             self.embeddings_batch = embeddings
@@ -329,7 +340,14 @@ class AttentionModel(nn.Module):
             )
         
         # === TSP / Windy TSP ===
-        # 1. Slice based on feature type
+        
+        # Handle 'blank' mode first
+        if self.node_feature_type == 'blank':
+            batch_size, num_nodes, _ = nodes.size()
+            # Expand the learnable parameter [1, 1, H] -> [B, N, H]
+            return self.init_embed_blank.expand(batch_size, num_nodes, -1)
+
+        # 1. Slice based on feature type (coords/learned/hybrid)
         if nodes.size(-1) == 2:
             features = nodes 
         elif self.node_feature_type == 'learned':
@@ -339,11 +357,9 @@ class AttentionModel(nn.Module):
         else: # coords
             features = nodes[..., 0:2]
 
-        # 2. Contiguous Fix & UNCONDITIONAL Sanitization
+        # 2. Contiguous Fix & Sanitization
         features = features.contiguous()
         
-        # Force cleanup of NaNs/Infs without checking .any() first
-        # This prevents CUDA sync issues from skipping the fix
         nan_mask = torch.isnan(features)
         features[nan_mask] = 0.0
         

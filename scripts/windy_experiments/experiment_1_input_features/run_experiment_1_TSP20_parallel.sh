@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # --- CONFIGURATION ---
-# We use a moderate batch size to ensure 3 runs fit comfortably in 16GB VRAM
 EPOCHS=100
 BATCH_SIZE=512 
 PROBLEM="windy_tsp"
@@ -9,15 +8,15 @@ TRAIN_DATA="data/windy_tsp/windy_tsp20_train.pkl"
 VAL_DATA="data/windy_tsp/windy_tsp20_val.pkl"
 GRAPH_SIZE=20 
 
-# Adjusted sizes to be multiples of 512
+# Adjusted sizes
 VAL_SIZE=5120      
 ROLLOUT_SIZE=10240 
 
-# Create a logs directory so output doesn't clutter the screen
 mkdir -p logs_exp1
 
 # --- COMMON SETTINGS ---
-# --num_workers 4 helps the CPU keep up with the GPU
+# OPTIMIZATION CHANGE: Reduced num_workers to 2 per run (Total 8 workers)
+# This prevents CPU choking while running 4 parallel experiments.
 ARGS="--problem $PROBLEM \
       --min_size $GRAPH_SIZE \
       --max_size $GRAPH_SIZE \
@@ -33,11 +32,11 @@ ARGS="--problem $PROBLEM \
       --gated \
       --gnn_direction_mode forward \
       --normalization layer \
-      --num_workers 6"
+      --num_workers 4 \
+      --no_progress_bar" 
 
 echo "=================================================="
 echo "Starting Parallel Execution on RTX 5080"
-echo "Logs are being saved to the 'logs_exp1' folder"
 echo "=================================================="
 
 # 1. Baseline
@@ -47,6 +46,7 @@ python run.py $ARGS \
     --run_name "exp1_coords" \
     > logs_exp1/coords.log 2>&1 &
 PID_A=$!
+sleep 5  # Stagger start to stabilize memory allocation
 
 # 2. Topological
 echo "Launching Run B: Learned..."
@@ -55,6 +55,7 @@ python run.py $ARGS \
     --run_name "exp1_learned" \
     > logs_exp1/learned.log 2>&1 &
 PID_B=$!
+sleep 5
 
 # 3. Hybrid
 echo "Launching Run C: Hybrid..."
@@ -63,11 +64,17 @@ python run.py $ARGS \
     --run_name "exp1_hybrid" \
     > logs_exp1/hybrid.log 2>&1 &
 PID_C=$!
+sleep 5
 
-echo "All processes launched. PIDs: $PID_A, $PID_B, $PID_C"
-echo "You can watch progress by running: tail -f logs_exp1/*.log"
+# 4. Blank
+echo "Launching Run D: Blank..."
+python run.py $ARGS \
+    --node_feature_type blank \
+    --run_name "exp1_blank" \
+    > logs_exp1/blank.log 2>&1 &
+PID_D=$!
 
-# Wait for all background processes to finish
-wait $PID_A $PID_B $PID_C
+echo "All processes launched. PIDs: $PID_A, $PID_B, $PID_C, $PID_D"
+wait $PID_A $PID_B $PID_C $PID_D
 
 echo "Experiment 1 Complete."

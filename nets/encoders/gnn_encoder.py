@@ -178,20 +178,26 @@ class GNNLayer(nn.Module):
 
 class GNNEncoder(nn.Module):
     """Configurable GNN Encoder
+    
     """
     
     def __init__(self, n_layers, hidden_dim, aggregation="sum", norm="layer", 
                  learn_norm=True, track_norm=False, gated=True, gnn_direction_mode = 'forward', *args, **kwargs):
         super(GNNEncoder, self).__init__()
 
+        # 1. Keep Legacy Support (Standard TSP uses binary graph 0/1)
         self.init_embed_edges = nn.Embedding(2, hidden_dim)
+        
+        # 2. Add New Support (Windy TSP uses continuous cost values)
+        self.init_lin_edges = nn.Linear(1, hidden_dim)
 
         self.layers = nn.ModuleList([
             GNNLayer(hidden_dim, aggregation, norm, learn_norm, track_norm, gated, gnn_direction_mode)
-                for _ in range(n_layers)
+            for _ in range(n_layers)
         ])
 
-    def forward(self, x, graph):
+
+    def forward(self, x, graph, cost_matrix=None):
         """
         Args:
             x: Input node features (B x V x H)
@@ -199,9 +205,19 @@ class GNNEncoder(nn.Module):
         Returns: 
             Updated node features (B x V x H)
         """
-        # Embed edge features
-        e = self.init_embed_edges(graph.type(torch.long))
 
+        # Choose initialization based on input availability
+        if cost_matrix is not None:
+            # --- Windy TSP Path ---
+            # Project scalar costs (floats) to hidden_dim
+            # Reshape from [B, V, V] -> [B, V, V, 1] for Linear layer
+            e = self.init_lin_edges(cost_matrix.unsqueeze(-1)) 
+        else:
+            # --- Standard TSP Path (Legacy) ---
+            # Embed binary connections (0 or 1)
+            e = self.init_embed_edges(graph.type(torch.long))
+
+        # Pass through GNN Layers
         for layer in self.layers:
             x, e = layer(x, e, graph)
 

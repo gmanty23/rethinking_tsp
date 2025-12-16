@@ -120,20 +120,20 @@ def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_datasets, p
     set_decode_type(model, "sampling")
 
     for batch_id, batch in enumerate(tqdm(train_dataloader, disable=opts.no_progress_bar, ascii=True)):
-
-        train_batch(
-            model,
-            optimizer,
-            baseline,
-            epoch,
-            batch_id,
-            step,
-            batch,
-            tb_logger,
-            opts
-        )
-
-        step += 1
+            train_batch(
+                model,
+                optimizer,
+                baseline,
+                epoch,
+                batch_id,
+                step,
+                batch,
+                tb_logger,
+                opts,
+                total_batches=len(train_dataloader),
+                start_time=start_time       
+            )
+            step += 1
     
     lr_scheduler.step(epoch)
 
@@ -163,18 +163,18 @@ def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_datasets, p
 
 
 def train_batch(model, optimizer, baseline, epoch, 
-                batch_id, step, batch, tb_logger, opts):
+                batch_id, step, batch, tb_logger, opts, total_batches=None, start_time=None):
     # Unwrap baseline
     bat, bl_val = baseline.unwrap_batch(batch)
     
     # Optionally move Tensors to GPU
     x = move_to(bat['nodes'], opts.device)
     graph = move_to(bat['graph'], opts.device)
+    cost_matrix = move_to(bat['cost_matrix'], opts.device) if 'cost_matrix' in bat else None
     bl_val = move_to(bl_val, opts.device) if bl_val is not None else None
 
     # Evaluate model, get costs and log probabilities
-    cost, log_likelihood = model(x, graph)
-
+    cost, log_likelihood = model(x, graph, cost_matrix=cost_matrix)
     # Evaluate baseline, get baseline loss if any (only for critic)
     bl_val, bl_loss = baseline.eval(x, graph, cost) if bl_val is None else (bl_val, 0)
 
@@ -199,7 +199,8 @@ def train_batch(model, optimizer, baseline, epoch,
     # Logging
     if step % int(opts.log_step) == 0:
         log_values(cost, grad_norms, epoch, batch_id, step, log_likelihood, 
-                   reinforce_loss, bl_loss, tb_logger, opts)
+                   reinforce_loss, bl_loss, tb_logger, opts, 
+                   total_batches=total_batches, start_time=start_time) 
 
         
 def train_epoch_sl(model, optimizer, lr_scheduler, epoch, train_dataset, val_datasets, problem, tb_logger, opts):

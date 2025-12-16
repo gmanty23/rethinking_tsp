@@ -66,8 +66,8 @@ def get_options(args=None):
                         help='Clip the parameters to within +- this value using tanh. Set to 0 to not do clipping.')
     
     # --- NEW ARGUMENTS FOR WINDY TSP ---
-    parser.add_argument('--node_feature_type', type=str, default='coords', choices=['coords', 'learned', 'hybrid'],
-                        help="Feature type for Windy TSP: 'coords' (x,y), 'learned' (stats), or 'hybrid' (both).")
+    parser.add_argument('--node_feature_type', type=str, default='coords', choices=['coords', 'learned', 'hybrid','blank'],
+                        help="Feature type for Windy TSP: 'coords' (x,y), 'learned' (stats), 'hybrid' (both), or 'blank' (learned completely from blank parameter).")
     parser.add_argument('--gnn_direction_mode', type=str, default='forward', choices=['forward', 'backward', 'dual'],
                         help="Directional aggregation for GNN: 'forward' (standard), 'backward' (outgoing), 'dual' (bi-directional).")
     # -----------------------------------
