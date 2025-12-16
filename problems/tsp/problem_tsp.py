@@ -283,8 +283,8 @@ class TSPDataset(Dataset):
                 self.wind_data = []
                 for _ in tqdm(range(num_samples), ascii=True):
                     num_nodes = np.random.randint(low=min_size, high=max_size+1)
-                    # Generate with default alpha=2.0, max_wind=0.5
-                    instance = generate_windy_instance(num_nodes, alpha=2.0, max_wind=0.5)
+                    # Generate with default alpha=5.0, max_wind=0.5
+                    instance = generate_windy_instance(num_nodes, alpha=5.0, max_wind=0.5)
                     self.wind_data.append(instance)
             else:
                 # Standard TSP Generation
@@ -335,7 +335,7 @@ class TSPDataset(Dataset):
             costs = dists * np.exp(-1.0 * alpha * wind_proj)
             np.fill_diagonal(costs, 0)
 
-            norm_costs = costs / (costs.max() + 1e-6)
+            # norm_costs = costs / (costs.max() + 1e-6)
             
             # Extract Stats
             # Mean Outgoing Cost (Row Mean)

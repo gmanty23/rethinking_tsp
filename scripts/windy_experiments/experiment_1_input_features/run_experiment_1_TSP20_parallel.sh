@@ -14,6 +14,7 @@ ROLLOUT_SIZE=10240
 
 mkdir -p logs_exp1
 
+
 # --- COMMON SETTINGS ---
 # OPTIMIZATION CHANGE: Reduced num_workers to 2 per run (Total 8 workers)
 # This prevents CPU choking while running 4 parallel experiments.
