@@ -203,19 +203,21 @@ def solve_lkh_windy(executable, directory, name, loc, wind, alpha, runs=1, disab
 
     # 3. Write Parameters
     params = f"""PROBLEM_FILE = {problem_filename}
-OUTPUT_TOUR_FILE = {tour_filename}
-RUNS = {runs}
-SEED = 1234
-PRECISION = 1
-"""
+                OUTPUT_TOUR_FILE = {tour_filename}
+                RUNS = {runs}
+                SEED = 1234
+                PRECISION = 1
+                """
     with open(param_filename, 'w') as f:
         f.write(params)
 
-# 4. Run LKH
+    # 4. Run LKH
     try:
         with open(log_filename, 'w') as f:
             # Make sure this line exists and is not commented out!
+            start = time.time()
             check_call([executable, param_filename], stdout=f, stderr=f) 
+            duration = time.time() - start
     except Exception as e:
         # If this prints, it's failing
         print(f"LKH Error on {name}: {e}")
