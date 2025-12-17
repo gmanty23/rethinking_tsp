@@ -4,6 +4,7 @@ from tqdm import tqdm
 import torch
 import math
 import numpy as np
+import pickle
 
 from sklearn.utils.class_weight import compute_class_weight
 
@@ -25,38 +26,46 @@ def set_decode_type(model, decode_type):
     model.set_decode_type(decode_type)
 
 
-def validate(model, dataset, problem, opts):
+def validate(model, dataset, problem, opts, baseline_cost=None):
     # Validate
     print('[{}] Validating...'.format(opts.run_name), flush=True)
     cost = rollout(model, dataset, opts)
+    avg_cost = cost.mean()
     
-    # SAFEGUARD: Try to calculate Optimality Gap
+    # 1. Try to use External Baseline (LKH) if provided
+    if baseline_cost is not None:
+        opt_gap = ((avg_cost / baseline_cost - 1) * 100)
+        
+        print('[{}] Val Avg Cost: {:.4f} +- {:.4f}'.format(
+            opts.run_name, avg_cost, torch.std(cost)), flush=True)
+        print('[{}] Val LKH Cost: {:.4f}'.format(
+            opts.run_name, baseline_cost), flush=True)
+        print('[{}] Val Gap: {:.3f}%'.format(
+            opts.run_name, opt_gap), flush=True)
+            
+        return avg_cost, opt_gap
+
+    # 2. Fallback: Try internal Ground Truth (for standard TSP)
     try:
         gt_cost = rollout_groundtruth(problem, dataset, opts)
         opt_gap = ((cost/gt_cost - 1) * 100)
         
-        # --- SUCCESS CASE (Ground Truth Exists) ---
         print('[{}] Val GT Cost: {:.4f} +- {:.4f}'.format(
             opts.run_name, gt_cost.mean(), torch.std(gt_cost)), flush=True)
-            
         print('[{}] Val Avg Cost: {:.4f} +- {:.4f}'.format(
-            opts.run_name, cost.mean(), torch.std(cost)), flush=True)
-            
+            opts.run_name, avg_cost, torch.std(cost)), flush=True)
         print('[{}] Val Gap: {:.3f}% +- {:.3f}'.format(
             opts.run_name, opt_gap.mean(), torch.std(opt_gap)), flush=True)
             
-        return cost.mean(), opt_gap.mean()
+        return avg_cost, opt_gap.mean()
 
-    except (KeyError, NotImplementedError):
-        # --- FALLBACK CASE (Windy TSP / No Ground Truth) ---
-        # Ground truth not found, just report average cost
+    except (KeyError, NotImplementedError, AttributeError):
+        # 3. No Baseline found (Just report Cost)
         print('[{}] Val Avg Cost: {:.4f} +- {:.4f}'.format(
-            opts.run_name, cost.mean(), torch.std(cost)), flush=True)
-            
-        print('[{}] Val GT Cost: N/A'.format(opts.run_name), flush=True)
-        # print('[{}] Val Gap: N/A'.format(opts.run_name), flush=True) # Optional to reduce spam
+            opts.run_name, avg_cost, torch.std(cost)), flush=True)
+        print('[{}] Val Gap: N/A (No LKH file or Ground Truth found)'.format(opts.run_name), flush=True)
         
-        return cost.mean(), 0  # Return 0 gap as placeholder
+        return avg_cost, 0
 
 
 def rollout(model, dataset, opts):
@@ -165,7 +174,34 @@ def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_datasets, p
         )
 
     for val_idx, val_dataset in enumerate(val_datasets):
-        avg_reward, avg_opt_gap = validate(model, val_dataset, problem, opts)
+        
+        # --- NEW CODE: Attempt to load LKH Baseline for this dataset ---
+        baseline_cost = None
+        try:
+            # 1. Get the path of the current validation dataset
+            # (Assumes opts.val_datasets is a list of paths matching the loaded datasets)
+            val_path = opts.val_datasets[val_idx]
+            dataset_basename = os.path.basename(val_path)
+            
+            # 2. Construct the expected path to the LKH result file
+            # It looks in: results/lkh_windy/dataset_name.pkl
+            lkh_file_path = os.path.join("results", "lkh_windy", dataset_basename)
+            
+            # 3. Load if exists
+            if os.path.isfile(lkh_file_path):
+                with open(lkh_file_path, 'rb') as f:
+                    lkh_data = pickle.load(f)
+                    # lkh_data is a list of tuples: (cost, tour, duration)
+                    # We extract just the costs [row[0]] and take the mean
+                    lkh_costs = [row[0] for row in lkh_data if row is not None]
+                    baseline_cost = np.mean(lkh_costs)
+        except Exception as e:
+            print(f"Warning: Could not load LKH baseline: {e}")
+        # ----------------------------------------------------------------
+
+        # Pass the baseline_cost to the validate function
+        avg_reward, avg_opt_gap = validate(model, val_dataset, problem, opts, baseline_cost=baseline_cost)
+        
         if not opts.no_tensorboard:
             tb_logger.add_scalar('val{}/avg_reward'.format(val_idx+1), avg_reward, step)
             tb_logger.add_scalar('val{}/opt_gap'.format(val_idx+1), avg_opt_gap, step)

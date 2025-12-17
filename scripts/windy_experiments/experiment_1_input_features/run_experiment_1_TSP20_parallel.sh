@@ -2,7 +2,7 @@
 
 # --- CONFIGURATION ---
 EPOCHS=100
-BATCH_SIZE=512 
+BATCH_SIZE=4096 
 PROBLEM="windy_tsp"
 TRAIN_DATA="data/windy_tsp/windy_tsp20_train.pkl"
 VAL_DATA="data/windy_tsp/windy_tsp20_val.pkl"

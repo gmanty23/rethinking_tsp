@@ -12,6 +12,17 @@ import torch
 from tqdm import tqdm
 import re
 
+#For windy TSP
+from data.windy_tsp.generate_windy_tsp import calculate_cost_matrix
+
+def get_lkh_executable():
+    ### CHANGED: Simple check to find the 'LKH' file we created in step 1
+    if os.path.isfile("LKH"):
+        return "./LKH"
+    elif os.path.isfile("LKH-3.0.6/LKH"):
+        return "LKH-3.0.6/LKH"
+    else:
+        raise FileNotFoundError("Could not find LKH executable. Did you run 'make' and copy it?")
 
 def solve_gurobi(directory, name, loc, disable_cache=False, timeout=None, gap=None):
     # Lazy import so we do not need to have gurobi installed to run this script
@@ -152,6 +163,90 @@ def write_tsplib(filename, loc, name="problem"):
         f.write("\n")
         f.write("EOF\n")
 
+# Write Assymetric TSP for LKH
+def write_atsp_tsplib(filename, cost_matrix, name="problem"):
+    n = cost_matrix.shape[0]
+    # LKH requires integers. Scale floats by 100,000 to keep precision.
+    scale_factor = 100000 
+    scaled_matrix = (cost_matrix * scale_factor).astype(int)
+
+    with open(filename, 'w') as f:
+        f.write(f"NAME: {name}\n")
+        f.write("TYPE: ATSP\n") # Asymmetric TSP
+        f.write(f"DIMENSION: {n}\n")
+        f.write("EDGE_WEIGHT_TYPE: EXPLICIT\n")
+        f.write("EDGE_WEIGHT_FORMAT: FULL_MATRIX\n")
+        f.write("EDGE_WEIGHT_SECTION\n")
+        for row in scaled_matrix:
+            f.write(" ".join(map(str, row)) + "\n")
+        f.write("EOF\n")
+    return scale_factor
+
+#Solve Windy TSP with LKH
+def solve_lkh_windy(executable, directory, name, loc, wind, alpha, runs=1, disable_cache=False):
+    
+    problem_filename = os.path.join(directory, "{}.atsp".format(name))
+    tour_filename = os.path.join(directory, "{}.tour".format(name))
+    param_filename = os.path.join(directory, "{}.par".format(name))
+    log_filename = os.path.join(directory, "{}.log".format(name))
+
+    # 1. Calculate Cost Matrix (Windy Logic)
+    try:
+        cost_matrix = calculate_cost_matrix(loc, wind, alpha)
+    except NameError:
+        # Fallback if import missing
+        from data.windy_tsp.generate_windy_tsp import calculate_cost_matrix
+        cost_matrix = calculate_cost_matrix(loc, wind, alpha)
+
+    # 2. Write ATSP file
+    write_atsp_tsplib(problem_filename, cost_matrix, name=name)
+
+    # 3. Write Parameters
+    params = f"""PROBLEM_FILE = {problem_filename}
+OUTPUT_TOUR_FILE = {tour_filename}
+RUNS = {runs}
+SEED = 1234
+PRECISION = 1
+"""
+    with open(param_filename, 'w') as f:
+        f.write(params)
+
+# 4. Run LKH
+    try:
+        with open(log_filename, 'w') as f:
+            # Make sure this line exists and is not commented out!
+            check_call([executable, param_filename], stdout=f, stderr=f) 
+    except Exception as e:
+        # If this prints, it's failing
+        print(f"LKH Error on {name}: {e}")
+        return None
+
+    # 5. Read Tour & Score
+    try:
+        with open(tour_filename, 'r') as f:
+            lines = f.readlines()
+        
+        tour = []
+        in_tour = False
+        for line in lines:
+            if "TOUR_SECTION" in line: in_tour = True; continue
+            if "EOF" in line or "-1" in line: break
+            if in_tour: 
+                val = int(line.strip())
+                if val != -1:
+                    tour.append(val - 1) # Convert 1-based to 0-based
+
+        # Score using the FLOAT cost matrix
+        total_cost = 0.0
+        full_tour = tour + [tour[0]]
+        for i in range(len(tour)):
+            u, v = full_tour[i], full_tour[i+1]
+            total_cost += cost_matrix[u, v]
+
+        return total_cost, tour, duration
+    except Exception as e:
+        print(f"Parsing Error on {name}: {e}")
+        return None
 
 def read_concorde_tour(filename):
     with open(filename, 'r') as f:
@@ -331,11 +426,25 @@ def solve_all_nn(dataset_path, eval_batch_size=1024, no_cuda=False, dataset_n=No
     return results, eval_batch_size
 
 
+
+def run_parsing(args):
+    # This function handles the multiprocessing dispatch
+    if len(args) == 3:
+        # Standard TSP (Concorde)
+        directory, name, coord = args
+        # return solve_concorde_log(directory, name, coord) # Uncomment if using Concorde
+        pass
+    elif len(args) == 5:
+        # Windy TSP (LKH)
+        directory, name, loc, wind, alpha = args
+        return solve_lkh_windy(directory, name, loc, wind, alpha)
+    return None
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("method",
-                        help="Name of the method to evaluate, 'nn', 'gurobi' or '(nearest|random|farthest)_insertion'")
+                        help="Name of the method to evaluate, 'nn', 'gurobi', 'lkh', 'lkh_windy', or '(nearest|random|farthest)_insertion'")
     parser.add_argument("datasets", nargs='+', help="Filename of the dataset(s) to evaluate")
     parser.add_argument("-f", action='store_true', help="Set true to overwrite")
     parser.add_argument("-o", default=None, help="Name of the results file to write")
@@ -377,53 +486,96 @@ if __name__ == "__main__":
         method = match[1]
         runs = 1 if match[2] == '' else int(match[2])
 
+        # ==========================================
+        # CASE 1: Nearest Neighbor (Standard)
+        # ==========================================
         if method == "nn":
             assert opts.offset is None, "Offset not supported for nearest neighbor"
-
             eval_batch_size = opts.max_calc_batch_size
-
             results, parallelism = solve_all_nn(
                 dataset_path, eval_batch_size, opts.no_cuda, opts.n,
                 opts.progress_bar_mininterval
             )
+        
+        # ==========================================
+        # CASE 2: Windy TSP with LKH (NEW)
+        # ==========================================
+        elif method == "lkh_windy":
+            target_dir = os.path.join(results_dir, "{}-{}".format(dataset_basename, opts.method))
+            if not os.path.isdir(target_dir): os.makedirs(target_dir)
+
+            # Load Raw Windy Dataset (Pickle)
+            # We bypass TSP.make_dataset because Windy data structure is different (dict/tuple)
+            windy_data = load_dataset(dataset_path)
+            
+            # Slice dataset
+            if opts.offset is not None: windy_data = windy_data[opts.offset:]
+            if opts.n is not None: windy_data = windy_data[:opts.n]
+
+            # Prepare data for pool execution
+            # Check if data is dict or tuple and normalize
+            dataset = []
+            for instance in windy_data:
+                if isinstance(instance, dict):
+                    dataset.append((instance['loc'], instance['wind'], instance['alpha']))
+                else:
+                    dataset.append(instance) # Assuming tuple (loc, wind, alpha)
+
+            use_multiprocessing = True
+            executable = get_lkh_executable()
+
+            def run_func(args):
+                # Handle variable argument unpacking
+                if len(args) == 5:
+                    directory, name, loc, wind, alpha = args
+                elif len(args) == 3:
+                    directory, name, data_item = args
+                    loc, wind, alpha = data_item
+                else:
+                    raise ValueError(f"Unexpected arg len: {len(args)}")
+
+                # Ensure executable is passed here too!
+                return solve_lkh_windy(executable, directory, name, loc, wind, alpha, runs=runs, disable_cache=opts.disable_cache)
+            
+            # Run in Pool
+            results, parallelism = run_all_in_pool(
+                run_func, target_dir, dataset, opts, use_multiprocessing=use_multiprocessing
+            )
+            
+            # For Windy TSP, we generally don't have Ground Truth in the file yet (this script makes it)
+            gt_costs = None 
+
+        # ==========================================
+        # CASE 3: Standard Solvers (Concorde, Gurobi, Insertion)
+        # ==========================================
         elif method in ("gurobi", "gurobigap", "gurobit", "concorde", "lkh") or method[-9:] == 'insertion':
 
-            target_dir = os.path.join(results_dir, "{}-{}".format(
-                dataset_basename,
-                opts.method
-            ))
+            target_dir = os.path.join(results_dir, "{}-{}".format(dataset_basename, opts.method))
             assert opts.f or not os.path.isdir(target_dir), \
                 "Target dir already exists! Try running with -f option to overwrite."
-
-            if not os.path.isdir(target_dir):
-                os.makedirs(target_dir)
+            if not os.path.isdir(target_dir): os.makedirs(target_dir)
             
-            # Load TSP dataset
+            # Load TSP dataset (Standard logic)
             tsp_dataset = TSP.make_dataset(
                 filename=dataset_path, batch_size=128, num_samples=opts.n, 
                 neighbors=-1, knn_strat='none', supervised=True
             )
-
-            # TSP contains single loc array rather than tuple
             dataset = [(instance, ) for instance in tsp_dataset.nodes_coords]
 
             if method == "concorde":
                 use_multiprocessing = False
                 executable = os.path.abspath(os.path.join('problems', 'tsp', 'concorde', 'concorde', 'TSP', 'concorde'))
-
                 def run_func(args):
                     return solve_concorde_log(executable, *args, disable_cache=opts.disable_cache)
 
             elif method == "lkh":
                 use_multiprocessing = False
                 executable = get_lkh_executable()
-
                 def run_func(args):
                     return solve_lkh_log(executable, *args, runs=runs, disable_cache=opts.disable_cache)
 
             elif method[:6] == "gurobi":
-                use_multiprocessing = True  # We run one thread per instance
-
+                use_multiprocessing = True
                 def run_func(args):
                     return solve_gurobi(*args, disable_cache=opts.disable_cache,
                                         timeout=runs if method[6:] == "t" else None,
@@ -431,44 +583,50 @@ if __name__ == "__main__":
             else:
                 assert method[-9:] == "insertion"
                 use_multiprocessing = True
-
                 def run_func(args):
                     return solve_insertion(*args, opts.method.split("_")[0])
 
             results, parallelism = run_all_in_pool(
-                run_func,
-                target_dir, dataset, opts, use_multiprocessing=use_multiprocessing
+                run_func, target_dir, dataset, opts, use_multiprocessing=use_multiprocessing
             )
+            
+            # Calculate Ground Truth from the TSP Dataset Object
+            import torch
+            from torch.utils.data import DataLoader
+            def rollout_groundtruth(problem, dataset):
+                return torch.cat([
+                    problem.get_costs(bat['nodes'], bat['tour_nodes'])[0]
+                    for bat in DataLoader(dataset, batch_size=128, shuffle=False, num_workers=0)
+                ], 0)
+            gt_costs = rollout_groundtruth(TSP, tsp_dataset).cpu().numpy()
 
         else:
             assert False, "Unknown method: {}".format(opts.method)
 
-        costs, tours, durations = zip(*results)  # Not really costs since they should be negative
+        # ==========================================
+        # Post-Processing and Reporting
+        # ==========================================
+        costs, tours, durations = zip(*results)
         costs, tours, durations = np.array(costs), np.array(tours), np.array(durations)
-        gt_tours = tsp_dataset.tour_nodes
         
-        def rollout_groundtruth(problem, dataset):
-            import torch
-            from torch.utils.data import DataLoader
-            return torch.cat([
-                problem.get_costs(bat['nodes'], bat['tour_nodes'])[0]
-                for bat in DataLoader(
-                    dataset, batch_size=128, shuffle=False, num_workers=0)
-            ], 0)
-        
-        gt_costs = rollout_groundtruth(TSP, tsp_dataset).cpu().numpy()
-        opt_gap = ((costs/gt_costs - 1) * 100)
-
-        results = zip(costs, gt_costs, tours, gt_tours, opt_gap, durations)
-
-        print('Validation groundtruth cost: {:.3f} +- {:.3f}'.format(
-            gt_costs.mean(), np.std(gt_costs)))
-        print('Validation average cost: {:.3f} +- {:.3f}'.format(
-            costs.mean(), np.std(costs)))
-        print('Validation optimality gap: {:.3f}% +- {:.3f}'.format(
-            opt_gap.mean(), np.std(opt_gap)))
-        print('Average duration: {:.3f}s +- {:.3f}'.format(
-            durations.mean() / parallelism, np.std(durations)))
+        # Output results
+        print(f"Results for method: {opts.method}")
+        print('Validation average cost: {:.3f} +- {:.3f}'.format(costs.mean(), np.std(costs)))
+        print('Average duration: {:.3f}s +- {:.3f}'.format(durations.mean() / parallelism, np.std(durations)))
         print('Total duration: {}s'.format(np.sum(durations)/parallelism))
-        
+
+        # Handle Opt Gap (Only if we have Ground Truth)
+        if gt_costs is not None:
+            opt_gap = ((costs/gt_costs - 1) * 100)
+            print('Validation groundtruth cost: {:.3f} +- {:.3f}'.format(gt_costs.mean(), np.std(gt_costs)))
+            print('Validation optimality gap: {:.3f}% +- {:.3f}'.format(opt_gap.mean(), np.std(opt_gap)))
+            results = zip(costs, gt_costs, tours, tsp_dataset.tour_nodes, opt_gap, durations)
+        else:
+            # For Windy TSP (where this run IS the ground truth), we save simplified results
+            print("No previous ground truth loaded (generating new baseline).")
+            # We create a dummy list for GT tours/costs to keep file format consistent if needed, 
+            # or just save what we have. Here we save (cost, tour, duration).
+            results = zip(costs, tours, durations)
+
         save_dataset(results, out_file)
+        print(f"Saved results to {out_file}")
