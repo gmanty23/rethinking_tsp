@@ -44,7 +44,8 @@ def log_values(cost, grad_norms, epoch, batch_id, step, log_likelihood,
     # Assuming run_name is like "exp1_coords", we print it first.
     print('[{}] Ep {} | Bt {}/{} | Cost: {:.4f} | Grad: {:.2f}{}'.format(
         opts.run_name, epoch, batch_id, total_batches if total_batches else "?", 
-        avg_cost, grad_norms[0], time_stats)
+        avg_cost, grad_norms[0], time_stats),
+        flush=True
     )
 
     # Log values to tensorboard (unchanged)

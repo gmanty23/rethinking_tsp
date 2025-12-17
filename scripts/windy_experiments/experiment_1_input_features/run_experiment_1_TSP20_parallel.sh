@@ -42,7 +42,7 @@ echo "=================================================="
 
 # 1. Baseline
 echo "Launching Run A: Coords..."
-python run.py $ARGS \
+python -u run.py $ARGS \
     --node_feature_type coords \
     --run_name "exp1_coords" \
     > logs_exp1/coords.log 2>&1 &
@@ -51,7 +51,7 @@ sleep 5  # Stagger start to stabilize memory allocation
 
 # 2. Topological
 echo "Launching Run B: Learned..."
-python run.py $ARGS \
+python -u run.py $ARGS \
     --node_feature_type learned \
     --run_name "exp1_learned" \
     > logs_exp1/learned.log 2>&1 &
@@ -60,7 +60,7 @@ sleep 5
 
 # 3. Hybrid
 echo "Launching Run C: Hybrid..."
-python run.py $ARGS \
+python -u run.py $ARGS \
     --node_feature_type hybrid \
     --run_name "exp1_hybrid" \
     > logs_exp1/hybrid.log 2>&1 &
@@ -69,7 +69,7 @@ sleep 5
 
 # 4. Blank
 echo "Launching Run D: Blank..."
-python run.py $ARGS \
+python -u run.py $ARGS \
     --node_feature_type blank \
     --run_name "exp1_blank" \
     > logs_exp1/blank.log 2>&1 &

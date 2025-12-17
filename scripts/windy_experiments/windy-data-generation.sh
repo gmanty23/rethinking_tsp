@@ -11,8 +11,8 @@ python data/windy_tsp/generate_windy_tsp.py \
     --max_nodes 20 \
     --num_samples 5120 \
     --filename data/windy_tsp/windy_tsp20_val.pkl \
-    --alpha 5.0 \
-    --max_wind 0.5 \
+    --alpha 3.0 \
+    --max_wind 1.0 \
     --seed 1234
 
 # # 2. Training Data

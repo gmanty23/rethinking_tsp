@@ -27,29 +27,34 @@ def set_decode_type(model, decode_type):
 
 def validate(model, dataset, problem, opts):
     # Validate
-    print(f'\nValidating on {dataset.size} samples from {dataset.filename}...')
+    print('[{}] Validating...'.format(opts.run_name), flush=True)
     cost = rollout(model, dataset, opts)
     
-    # SAFEGUARD: Try to calculate Optimality Gap, but skip if ground truth is missing
+    # SAFEGUARD: Try to calculate Optimality Gap
     try:
         gt_cost = rollout_groundtruth(problem, dataset, opts)
         opt_gap = ((cost/gt_cost - 1) * 100)
         
-        print('Validation groundtruth cost: {:.3f} +- {:.3f}'.format(
-            gt_cost.mean(), torch.std(gt_cost)))
-        print('Validation average cost: {:.3f} +- {:.3f}'.format(
-            cost.mean(), torch.std(cost)))
-        print('Validation optimality gap: {:.3f}% +- {:.3f}'.format(
-            opt_gap.mean(), torch.std(opt_gap)))
+        # --- SUCCESS CASE (Ground Truth Exists) ---
+        print('[{}] Val GT Cost: {:.4f} +- {:.4f}'.format(
+            opts.run_name, gt_cost.mean(), torch.std(gt_cost)), flush=True)
+            
+        print('[{}] Val Avg Cost: {:.4f} +- {:.4f}'.format(
+            opts.run_name, cost.mean(), torch.std(cost)), flush=True)
+            
+        print('[{}] Val Gap: {:.3f}% +- {:.3f}'.format(
+            opts.run_name, opt_gap.mean(), torch.std(opt_gap)), flush=True)
             
         return cost.mean(), opt_gap.mean()
 
-    except KeyError:
-        # Ground truth not found (e.g. Windy TSP), just report average cost
-        print('Validation average cost: {:.3f} +- {:.3f}'.format(
-            cost.mean(), torch.std(cost)))
-        print('Validation groundtruth cost: N/A')
-        print('Validation optimality gap: N/A')
+    except (KeyError, NotImplementedError):
+        # --- FALLBACK CASE (Windy TSP / No Ground Truth) ---
+        # Ground truth not found, just report average cost
+        print('[{}] Val Avg Cost: {:.4f} +- {:.4f}'.format(
+            opts.run_name, cost.mean(), torch.std(cost)), flush=True)
+            
+        print('[{}] Val GT Cost: N/A'.format(opts.run_name), flush=True)
+        # print('[{}] Val Gap: N/A'.format(opts.run_name), flush=True) # Optional to reduce spam
         
         return cost.mean(), 0  # Return 0 gap as placeholder
 
@@ -97,7 +102,10 @@ def clip_grad_norms(param_groups, max_norm=math.inf):
 
 
 def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_datasets, problem, tb_logger, opts):
-    print("\nStart train epoch {}, lr={} for run {}".format(epoch, optimizer.param_groups[0]['lr'], opts.run_name))
+    print("\n[{}] Start train epoch {}, lr={}".format(
+    opts.run_name, epoch, optimizer.param_groups[0]['lr']), 
+    flush=True
+    )
     step = epoch * (opts.epoch_size // opts.batch_size)
     start_time = time.time()
 
@@ -138,7 +146,10 @@ def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_datasets, p
     lr_scheduler.step(epoch)
 
     epoch_duration = time.time() - start_time
-    print("Finished epoch {}, took {} s".format(epoch, time.strftime('%H:%M:%S', time.gmtime(epoch_duration))))
+    print('[{}] Finished epoch {}, took {} s'.format(
+    opts.run_name, epoch, time.strftime('%H:%M:%S', time.gmtime(time.time() - start_time))), 
+    flush=True
+)
 
     if (opts.checkpoint_epochs != 0 and epoch % opts.checkpoint_epochs == 0) or epoch == opts.n_epochs - 1:
         print('Saving model and state...')

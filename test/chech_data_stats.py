@@ -38,8 +38,8 @@ def check_dominance_on_the_fly():
     MAX_SIZE = 20  # Keep fixed size for consistent analysis
     
     # Current Default Parameters in your code
-    ALPHA = 2.0      # [cite: 440]
-    MAX_WIND = 2.0   # [cite: 440]
+    ALPHA = 3.0     
+    MAX_WIND = 1.0 
     
     print(f"Generating {NUM_SAMPLES} samples on the fly (Nodes: {MIN_SIZE}-{MAX_SIZE})...")
     print(f"Parameters: Alpha={ALPHA}, Max_Wind={MAX_WIND}")
