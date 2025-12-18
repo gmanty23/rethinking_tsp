@@ -42,21 +42,28 @@ python data/windy_tsp/generate_windy_tsp.py \
 LKH_TARGET="results/lkh_windy/$(basename $VAL_DATA)"
 TEMP_RESULTS_DIR="results/windy_tsp20_val"
 
-if [ ! -f "$LKH_TARGET" ]; then
-    echo "LKH target not found. Running solver..."
-    if [ -d "$TEMP_RESULTS_DIR" ]; then rm -rf "$TEMP_RESULTS_DIR"; fi
+echo "=================================================="
+echo "Running LKH Solver (Forcing Regeneration)..."
+echo "=================================================="
 
-    python eval_baseline.py lkh_windy "$VAL_DATA" -n "$VAL_SIZE" --disable_cache
+# Remove previous target if it exists to ensure fresh copy
+rm -f "$LKH_TARGET"
 
-    GENERATED_FILE=$(find results -name "*lkh_windy.pkl" | head -n 1)
-    if [ -f "$GENERATED_FILE" ]; then
-        mv "$GENERATED_FILE" "$LKH_TARGET"
-    else
-        echo "ERROR: Could not find generated LKH file!"
-        exit 1
-    fi
+# Clean up temp directory
+if [ -d "$TEMP_RESULTS_DIR" ]; then rm -rf "$TEMP_RESULTS_DIR"; fi
+
+# Run the solver
+python eval_baseline.py lkh_windy "$VAL_DATA" -n "$VAL_SIZE" --disable_cache
+
+# Move and verify results
+GENERATED_FILE=$(find results -name "*lkh_windy.pkl" | head -n 1)
+
+if [ -f "$GENERATED_FILE" ]; then
+    mv "$GENERATED_FILE" "$LKH_TARGET"
+    echo "LKH Solutions successfully generated and moved to $LKH_TARGET"
 else
-    echo "LKH Data found. Skipping solver."
+    echo "ERROR: Could not find generated LKH file!"
+    exit 1
 fi
 
 # ==================================================

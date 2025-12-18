@@ -2,6 +2,7 @@ import os
 import time
 from tqdm import tqdm
 import torch
+import torch.cuda.amp as amp
 import math
 import numpy as np
 import pickle
@@ -14,6 +15,8 @@ from torch.nn import DataParallel
 from utils.log_utils import log_values, log_values_sl
 from utils.data_utils import BatchedRandomSampler
 from utils import move_to
+
+
 
 
 def get_inner_model(model):
@@ -135,6 +138,7 @@ def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_datasets, p
     model.train()
     optimizer.zero_grad()
     set_decode_type(model, "sampling")
+    scaler = amp.GradScaler(enabled=True)
 
     for batch_id, batch in enumerate(tqdm(train_dataloader, disable=opts.no_progress_bar, ascii=True)):
             train_batch(
@@ -148,7 +152,8 @@ def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_datasets, p
                 tb_logger,
                 opts,
                 total_batches=len(train_dataloader),
-                start_time=start_time       
+                start_time=start_time,
+                scaler=scaler       
             )
             step += 1
     
@@ -210,7 +215,7 @@ def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_datasets, p
 
 
 def train_batch(model, optimizer, baseline, epoch, 
-                batch_id, step, batch, tb_logger, opts, total_batches=None, start_time=None):
+                batch_id, step, batch, tb_logger, opts, total_batches=None, start_time=None, scaler=None):
     # Unwrap baseline
     bat, bl_val = baseline.unwrap_batch(batch)
     
@@ -221,33 +226,48 @@ def train_batch(model, optimizer, baseline, epoch,
     bl_val = move_to(bl_val, opts.device) if bl_val is not None else None
 
     # Evaluate model, get costs and log probabilities
-    cost, log_likelihood = model(x, graph, cost_matrix=cost_matrix)
-    # Evaluate baseline, get baseline loss if any (only for critic)
-    bl_val, bl_loss = baseline.eval(x, graph, cost) if bl_val is None else (bl_val, 0)
+    with amp.autocast(enabled=True):
+            # Evaluate model, get costs and log probabilities
+            cost, log_likelihood = model(x, graph, cost_matrix=cost_matrix)
+            
+            # Evaluate baseline
+            bl_val, bl_loss = baseline.eval(x, graph, cost) if bl_val is None else (bl_val, 0)
 
-    # Calculate loss
-    reinforce_loss = ((cost - bl_val) * log_likelihood).mean()
-    loss = reinforce_loss + bl_loss
-    
-    # Normalize loss for gradient accumulation
-    loss = loss / opts.accumulation_steps
+            # Calculate loss
+            reinforce_loss = ((cost - bl_val) * log_likelihood).mean()
+            loss = reinforce_loss + bl_loss
+            
+            # Normalize loss for accumulation
+            loss = loss / opts.accumulation_steps
 
     # Perform backward pass
-    loss.backward()
+    if scaler is not None:
+            scaler.scale(loss).backward()
+    else:
+            loss.backward()
     
     # Clip gradient norms and get (clipped) gradient norms for logging
+    if scaler is not None:
+            scaler.unscale_(optimizer)
+
+        # Clip gradient norms
     grad_norms = clip_grad_norms(optimizer.param_groups, opts.max_grad_norm)
     
     # Perform optimization step after accumulating gradients
     if step % opts.accumulation_steps == 0:
-        optimizer.step()
-        optimizer.zero_grad()
+            if scaler is not None:
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                optimizer.step()
+            
+            optimizer.zero_grad()
 
     # Logging
     if step % int(opts.log_step) == 0:
-        log_values(cost, grad_norms, epoch, batch_id, step, log_likelihood, 
-                   reinforce_loss, bl_loss, tb_logger, opts, 
-                   total_batches=total_batches, start_time=start_time) 
+            log_values(cost, grad_norms, epoch, batch_id, step, log_likelihood, 
+                    reinforce_loss, bl_loss, tb_logger, opts, 
+                    total_batches=total_batches, start_time=start_time)
 
         
 def train_epoch_sl(model, optimizer, lr_scheduler, epoch, train_dataset, val_datasets, problem, tb_logger, opts):
