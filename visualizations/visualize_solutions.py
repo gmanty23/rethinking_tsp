@@ -29,11 +29,11 @@ from utils.functions import load_model
 # ==========================================
 LKH_PATH = "./LKH" 
 
-ALPHA = 3.0
-MAX_WIND = 1.0
+ALPHA = 5.0
+MAX_WIND = 0.5
 NUM_NODES = 20
-SEED = 12344 
-BASE_DIR = "outputs/windy_tsp_20-20/exp1_hurricane_w_baseline"
+SEED = 12345 
+BASE_DIR = "outputs/windy_tsp_20-20/exp1_TSP20_windstrong"
 
 MODEL_A_KEY = "coords"
 MODEL_B_KEY = "learned"
