@@ -81,6 +81,8 @@ def get_options(args=None):
                         help='Learning rate decay per epoch')
     parser.add_argument('--max_grad_norm', type=float, default=1.0, 
                         help='Maximum L2 norm for gradient clipping (0 to disable clipping)')
+    parser.add_argument('--entropy_coeff', type=float, default=0.0,
+                        help='Coefficient for entropy regularization (to encourage exploration)')
     parser.add_argument('--exp_beta', type=float, default=0.8,
                         help='Exponential moving average baseline decay')
     parser.add_argument('--baseline', default='rollout',

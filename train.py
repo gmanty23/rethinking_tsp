@@ -140,8 +140,13 @@ def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_datasets, p
     set_decode_type(model, "sampling")
     scaler = amp.GradScaler(enabled=True)
 
+    # --- TRACKING ---
+    epoch_confidence_sum = 0
+    num_batches = 0
+    # ----------------
+
     for batch_id, batch in enumerate(tqdm(train_dataloader, disable=opts.no_progress_bar, ascii=True)):
-            train_batch(
+            batch_conf = train_batch(
                 model,
                 optimizer,
                 baseline,
@@ -155,15 +160,21 @@ def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_datasets, p
                 start_time=start_time,
                 scaler=scaler       
             )
+
+            epoch_confidence_sum += batch_conf
+            num_batches += 1
             step += 1
     
     lr_scheduler.step(epoch)
 
+    # --- PRINT EPOCH STATS ---
+    avg_conf = epoch_confidence_sum / num_batches if num_batches > 0 else 0.0
     epoch_duration = time.time() - start_time
-    print('[{}] Finished epoch {}, took {} s'.format(
-    opts.run_name, epoch, time.strftime('%H:%M:%S', time.gmtime(time.time() - start_time))), 
-    flush=True
-)
+    print('[{}] Finished epoch {}, took {} s. Avg Confidence: {:.4f}'.format(
+        opts.run_name, epoch, time.strftime('%H:%M:%S', time.gmtime(epoch_duration)), avg_conf), 
+        flush=True
+    )
+    # -------------------------
 
     if (opts.checkpoint_epochs != 0 and epoch % opts.checkpoint_epochs == 0) or epoch == opts.n_epochs - 1:
         print('Saving model and state...')
@@ -228,17 +239,33 @@ def train_batch(model, optimizer, baseline, epoch,
     # Evaluate model, get costs and log probabilities
     with amp.autocast(enabled=True):
             # Evaluate model, get costs and log probabilities
-            cost, log_likelihood = model(x, graph, cost_matrix=cost_matrix)
-            
+            if opts.entropy_coeff > 0:
+                cost, log_likelihood, entropy = model(x, graph, cost_matrix=cost_matrix, return_entropy=True)
+            else:
+                cost, log_likelihood = model(x, graph, cost_matrix=cost_matrix, return_entropy=False)
+                entropy = None
+
+            # --- STATS: Calculate Model Confidence ---
+            # log_likelihood is the sum of log_probs for the tour.
+            # We approximate average probability per node.
+            # (Note: This is an approximation for logging purposes)
+            avg_log_prob = log_likelihood.mean() / x.size(1) 
+            model_confidence = torch.exp(avg_log_prob).item()
+            # -----------------------------------------
+
             # Evaluate baseline
             bl_val, bl_loss = baseline.eval(x, graph, cost) if bl_val is None else (bl_val, 0)
 
             # Calculate loss
             reinforce_loss = ((cost - bl_val) * log_likelihood).mean()
-            loss = reinforce_loss + bl_loss
             
-            # Normalize loss for accumulation
-            loss = loss / opts.accumulation_steps
+            # Add Entropy Regularization
+            if entropy is not None:
+                # We want to MAXIMIZE entropy -> MINIMIZE -entropy
+                # So we subtract (coeff * entropy) from the loss
+                reinforce_loss = reinforce_loss - opts.entropy_coeff * entropy.mean()
+
+            loss = reinforce_loss + bl_loss
 
     # Perform backward pass
     if scaler is not None:
@@ -268,7 +295,15 @@ def train_batch(model, optimizer, baseline, epoch,
             log_values(cost, grad_norms, epoch, batch_id, step, log_likelihood, 
                     reinforce_loss, bl_loss, tb_logger, opts, 
                     total_batches=total_batches, start_time=start_time)
+            # Print confidence to console for immediate check
+            print(f"Conf: {model_confidence:.4f}", end=" ")
+            
+            if not opts.no_tensorboard:
+                tb_logger.add_scalar('stats/confidence', model_confidence, step)
+                if entropy is not None:
+                    tb_logger.add_scalar('stats/entropy', entropy.mean().item(), step)
 
+    return model_confidence
         
 def train_epoch_sl(model, optimizer, lr_scheduler, epoch, train_dataset, val_datasets, problem, tb_logger, opts):
     print("\nStart train epoch {}, lr={} for run {}".format(epoch, optimizer.param_groups[0]['lr'], opts.run_name))

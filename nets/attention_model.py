@@ -7,10 +7,12 @@ from torch import nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 from torch.nn import DataParallel
+import torch.distributions as dist
 
 from utils.tensor_functions import compute_in_batches
 from utils.beam_search import CachedLookup
 from utils.functions import sample_many
+
 
 
 class AttentionModelFixed(NamedTuple):
@@ -195,7 +197,7 @@ class AttentionModel(nn.Module):
         if temp is not None:  # Do not change temperature if not provided
             self.temp = temp
 
-    def forward(self, nodes, graph, cost_matrix=None, supervised=False, targets=None, class_weights=None, return_pi=False):
+    def forward(self, nodes, graph, cost_matrix=None, supervised=False, targets=None, class_weights=None, return_pi=False, return_entropy=False):
         """
         Args:
             nodes: Input graph nodes (B x V x Features)
@@ -256,6 +258,24 @@ class AttentionModel(nn.Module):
             # returning it per action does not work well with DataParallel 
             # (since sequences can be of different lengths)
             ll = self._calc_log_likelihood(_log_p, pi, mask)
+
+            if return_entropy:
+                # Calculate Entropy safely using PyTorch's Categorical distribution
+                # _log_p shape: (Batch, Steps, Nodes)
+                
+                # 1. Get probabilities
+                probs = _log_p.exp()
+                
+                # 2. Use Categorical.entropy() which handles 0*log(0) and numerical stability correctly
+                # Categorical treats the last dimension as the class probabilities
+                entropy_per_step = dist.Categorical(probs=probs).entropy()
+                
+                # 3. Mean over steps (dim 1) to get average entropy per action
+                entropy = entropy_per_step.mean(dim=1)
+
+                if return_pi:
+                    return cost, ll, pi, entropy
+                return cost, ll, entropy
             
             if return_pi:
                 return cost, ll, pi

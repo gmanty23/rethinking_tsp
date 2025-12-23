@@ -7,6 +7,7 @@ BATCH_SIZE=512
 EPOCHS=100
 PROBLEM="windy_tsp"
 GRAPH_SIZE=20 
+ENTROPY_COEFF=0.01  
 
 # Validation Settings (Multiples of 512)
 VAL_DATA="data/windy_tsp/windy_tsp20_val.pkl"
@@ -86,19 +87,21 @@ ARGS="--problem $PROBLEM \
       --gnn_direction_mode forward \
       --normalization layer \
       --num_workers 4 \
-      --no_progress_bar "
+      --no_progress_bar \
+      --entropy_coeff $ENTROPY_COEFF" # <--- Uses the variable
 
 echo "=================================================="
 echo "Starting Parallel Execution on RTX 5080 (Batch 512)"
-echo "Logs > logs_exp1/"
+echo "Entropy Coefficient: $ENTROPY_COEFF"
+echo "Logs > logs_exp1/*_ent${ENTROPY_COEFF}.log"
 echo "=================================================="
 
 # 1. Baseline
 echo "Launching Run A: Coords..."
 python -u run.py $ARGS \
     --node_feature_type coords \
-    --run_name "exp1_coords" \
-    > logs_exp1/coords.log 2>&1 &
+    --run_name "exp1_coords_ent${ENTROPY_COEFF}" \
+    > logs_exp1/coords_ent${ENTROPY_COEFF}.log 2>&1 &
 PID_A=$!
 sleep 5 
 
@@ -106,8 +109,8 @@ sleep 5
 echo "Launching Run B: Learned..."
 python -u run.py $ARGS \
     --node_feature_type learned \
-    --run_name "exp1_learned" \
-    > logs_exp1/learned.log 2>&1 &
+    --run_name "exp1_learned_ent${ENTROPY_COEFF}" \
+    > logs_exp1/learned_ent${ENTROPY_COEFF}.log 2>&1 &
 PID_B=$!
 sleep 5
 
@@ -115,8 +118,8 @@ sleep 5
 echo "Launching Run C: Hybrid..."
 python -u run.py $ARGS \
     --node_feature_type hybrid \
-    --run_name "exp1_hybrid" \
-    > logs_exp1/hybrid.log 2>&1 &
+    --run_name "exp1_hybrid_ent${ENTROPY_COEFF}" \
+    > logs_exp1/hybrid_ent${ENTROPY_COEFF}.log 2>&1 &
 PID_C=$!
 sleep 5
 
@@ -124,12 +127,12 @@ sleep 5
 echo "Launching Run D: Blank..."
 python -u run.py $ARGS \
     --node_feature_type blank \
-    --run_name "exp1_blank" \
-    > logs_exp1/blank.log 2>&1 &
+    --run_name "exp1_blank_ent${ENTROPY_COEFF}" \
+    > logs_exp1/blank_ent${ENTROPY_COEFF}.log 2>&1 &
 PID_D=$!
 
 echo "All processes launched. PIDs: $PID_A, $PID_B, $PID_C, $PID_D"
-echo "To monitor: tail -f logs_exp1/*.log"
+echo "To monitor: tail -f logs_exp1/*_ent${ENTROPY_COEFF}.log"
 wait $PID_A $PID_B $PID_C $PID_D
 
 echo "Experiment 1 Complete."
