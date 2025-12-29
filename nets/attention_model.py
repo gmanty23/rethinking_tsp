@@ -149,15 +149,28 @@ class AttentionModel(nn.Module):
             step_context_dim = 2 * embedding_dim
             
             # === FEATURE DIMENSION LOGIC ===
+            # 8 stats: Mean, Std, Min, Max (for both Out and In)
+            NUM_STATS = 8
             if self.node_feature_type == 'hybrid':
-                node_dim = 4
+                node_dim = 2 + NUM_STATS # Coordinates + learned features
             elif self.node_feature_type == 'learned':
-                node_dim = 2
+                node_dim = NUM_STATS
             elif self.node_feature_type == 'coords':
                 node_dim = 2
             else:
                 # For 'blank' mode, node_dim is irrelevant for the Linear layer
                 node_dim = 0
+
+            # # === FEATURE DIMENSION LOGIC ===  #AQUI
+            # if self.node_feature_type == 'hybrid':
+            #     node_dim = 4
+            # elif self.node_feature_type == 'learned':
+            #     node_dim = 2
+            # elif self.node_feature_type == 'coords':
+            #     node_dim = 2
+            # else:
+            #     # For 'blank' mode, node_dim is irrelevant for the Linear layer
+            #     node_dim = 0
 
             # Learned input symbols for first action
             self.W_placeholder = nn.Parameter(torch.Tensor(2 * embedding_dim))
@@ -311,7 +324,7 @@ class AttentionModel(nn.Module):
 
         # Parent is row idx of ind_topk,
         # can be found by enumerating elements and dividing by number of columns
-        flat_parent = torch.arange(flat_action.size(-1), out=flat_action.new()) / ind_topk.size(-1)
+        flat_parent = torch.arange(flat_action.size(-1), out=flat_action.new()) // ind_topk.size(-1)
 
         # Filter infeasible
         feas_ind_2d = torch.nonzero(flat_feas)
@@ -367,15 +380,27 @@ class AttentionModel(nn.Module):
             # Expand the learnable parameter [1, 1, H] -> [B, N, H]
             return self.init_embed_blank.expand(batch_size, num_nodes, -1)
 
-        # 1. Slice based on feature type (coords/learned/hybrid)
+        # # 1. Slice based on feature type (coords/learned/hybrid)
         if nodes.size(-1) == 2:
-            features = nodes 
+            features = nodes
         elif self.node_feature_type == 'learned':
-            features = nodes[..., 5:7] 
+            # Take all features from index 5 to the end
+            features = nodes[..., 5:] 
         elif self.node_feature_type == 'hybrid':
-            features = torch.cat((nodes[..., 0:2], nodes[..., 5:7]), dim=-1)
+            # Concatenate coords (0:2) with all stats (5:end)
+            features = torch.cat((nodes[..., 0:2], nodes[..., 5:]), dim=-1)
         else: # coords
             features = nodes[..., 0:2]
+
+        # # 1. Slice based on feature type (coords/learned/hybrid) AQUI
+        # if nodes.size(-1) == 2:
+        #     features = nodes 
+        # elif self.node_feature_type == 'learned':
+        #     features = nodes[..., 5:7] 
+        # elif self.node_feature_type == 'hybrid':
+        #     features = torch.cat((nodes[..., 0:2], nodes[..., 5:7]), dim=-1)
+        # else: # coords
+        #     features = nodes[..., 0:2]
 
         # 2. Contiguous Fix & Sanitization
         features = features.contiguous()

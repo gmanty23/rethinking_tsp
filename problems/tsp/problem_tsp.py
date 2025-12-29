@@ -339,22 +339,37 @@ class TSPDataset(Dataset):
             norm_costs = costs
 
             # Extract Stats
-            # Mean Outgoing Cost (Row Mean)
-            # We exclude the diagonal (self-loop) which is 0, so sum / (N-1)
-            stat_out = np.sum(costs, axis=1, keepdims=True) / (num_nodes - 1)
-            
-            # Mean Incoming Cost (Col Mean)
-            stat_in = np.sum(costs, axis=0, keepdims=True).T / (num_nodes - 1)
-            
+            # Mask diagonal with NaN to ignore self-loops in stats
+            costs_masked = costs.copy()
+            np.fill_diagonal(costs_masked, np.nan)
+
+            # OUTGOING Stats (Axis 1 = Rows)
+            stat_out_mean = np.nanmean(costs_masked, axis=1, keepdims=True)
+            stat_out_std  = np.nanstd(costs_masked, axis=1, keepdims=True)
+            stat_out_min  = np.nanmin(costs_masked, axis=1, keepdims=True)
+            stat_out_max  = np.nanmax(costs_masked, axis=1, keepdims=True)
+
+            # INCOMING Stats (Axis 0 = Cols)
+            stat_in_mean  = np.nanmean(costs_masked, axis=0, keepdims=True).T
+            stat_in_std   = np.nanstd(costs_masked, axis=0, keepdims=True).T
+            stat_in_min   = np.nanmin(costs_masked, axis=0, keepdims=True).T
+            stat_in_max   = np.nanmax(costs_masked, axis=0, keepdims=True).T
+
             # 3. Super-Packing
-            # Structure: [x, y, w_x, w_y, alpha, stat_out, stat_in]
-            # Indices:    0  1   2    3      4       5         6
+            # Structure: [x, y, w_x, w_y, alpha,  mean_out, mean_in, std_out, std_in, min_out, min_in, max_out, max_in]
+            # Indices:    0  1   2    3      4       5         6        7        8        9        10       11       12
             nodes_feature = np.concatenate([
-                loc,            # 0-1
-                wind_repeated,  # 2-3
-                alpha_repeated, # 4
-                stat_out,       # 5
-                stat_in         # 6
+                loc,              # 0-1
+                wind_repeated,    # 2-3
+                alpha_repeated,   # 4
+                stat_out_mean,    # 5
+                stat_in_mean,     # 6
+                stat_out_std,     # 7
+                stat_in_std,      # 8
+                stat_out_min,     # 9
+                stat_in_min,      # 10
+                stat_out_max,     # 11
+                stat_in_max       # 12
             ], axis=-1)
             
             return {

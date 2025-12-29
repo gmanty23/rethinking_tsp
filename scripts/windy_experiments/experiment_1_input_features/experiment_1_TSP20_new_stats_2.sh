@@ -1,29 +1,26 @@
 #!/bin/bash
 
-# --- HARDWARE CONFIGURATION (Optimized for RTX 5080 + 24 Cores) ---
-# TSP-50 requires more memory. 128 is safe. 
-BATCH_SIZE=128
-
-# 3 Parallel Runs * 6 Workers = 18 threads. Leaves 6 cores for OS/Overhead.
-NUM_WORKERS=6
+# --- HARDWARE CONFIGURATION (Safe Mode) ---
+# Keeping Batch Size 1280 to ensure 4 parallel runs fit in 16GB VRAM.
+BATCH_SIZE=1024
+# 5 Workers per run * 4 runs = 20 cores. Leaves 4 cores for OS/Python overhead.
+NUM_WORKERS=5  
 
 # --- EXPERIMENT SETTINGS ---
 EPOCHS=100
 PROBLEM="windy_tsp"
-GRAPH_SIZE=50 
-ENTROPY_VALUES=(0.01 0.05 0.1 0.2 1.0)
-FEATURE_TYPES=("coords" "learned" "hybrid")
+GRAPH_SIZE=20 
+ENTROPY_VALUES=(0.05 0.1)
+FEATURE_TYPES=("learned" "hybrid")
 
-# --- DATA SETTINGS (TSP-50) ---
-VAL_DATA="data/windy_tsp/windy_tsp50_val.pkl"
-
-# Adjusted sizes for TSP-50 training speed
-VAL_SIZE=2560
-EPOCH_SIZE=640000 
-ROLLOUT_SIZE=2560
+# --- DATA SETTINGS ---
+VAL_DATA="data/windy_tsp/windy_tsp20_val.pkl"
+VAL_SIZE=5120
+EPOCH_SIZE=1280000 
+ROLLOUT_SIZE=10240
 
 # Setup directories
-LOG_DIR="logs_tsp50_final"
+LOG_DIR="logs_windy_stats_final"
 mkdir -p $LOG_DIR
 mkdir -p data/windy_tsp
 mkdir -p results/lkh_windy
@@ -83,30 +80,23 @@ else
 fi
 
 # ==================================================
-# 3. BATCHED PARALLEL EXECUTION
+# 3. PARALLEL EXECUTION (6 RUNS SIMULTANEOUSLY)
 # ==================================================
 echo "=================================================="
-echo "Starting Execution: 3 Parallel Jobs at a time"
+echo "Launching 4 parallel experiments..."
 echo "=================================================="
 
-# We loop through Entropy sequentially, but run Feature Types in parallel.
-# This keeps us at 3 concurrent jobs max.
+PIDS=()
 
 for ENTROPY in "${ENTROPY_VALUES[@]}"; do
-    
-    echo "----------------------------------------------------------------"
-    echo "Starting Batch for Entropy: $ENTROPY"
-    echo "----------------------------------------------------------------"
-    
-    PIDS=()
-    
     for TYPE in "${FEATURE_TYPES[@]}"; do
         
-        RUN_NAME="tsp50_${TYPE}_ent${ENTROPY}"
+        RUN_NAME="stats_${TYPE}_ent${ENTROPY}"
         LOG_FILE="${LOG_DIR}/${RUN_NAME}.log"
         
         echo " -> Launching: $TYPE | Entropy: $ENTROPY"
 
+        # Using -u for unbuffered output
         python -u run.py \
             --problem $PROBLEM \
             --min_size $GRAPH_SIZE \
@@ -114,7 +104,6 @@ for ENTROPY in "${ENTROPY_VALUES[@]}"; do
             --n_epochs $EPOCHS \
             --batch_size $BATCH_SIZE \
             --epoch_size $EPOCH_SIZE \
-            --train_dataset $TRAIN_DATA \
             --val_datasets $VAL_DATA \
             --val_size $VAL_SIZE \
             --rollout_size $ROLLOUT_SIZE \
@@ -131,14 +120,18 @@ for ENTROPY in "${ENTROPY_VALUES[@]}"; do
             > "$LOG_FILE" 2>&1 &
         
         PIDS+=($!)
-        sleep 5 # Stagger start to stabilize VRAM allocation
+        sleep 3 # Stagger start to avoid disk I/O spikes
     done
-    
-    echo "Waiting for batch (Entropy $ENTROPY) to finish..."
-    # Wait for these 3 specific PIDs to finish before starting the next entropy
-    wait "${PIDS[@]}"
-    echo "Batch Complete."
+done
 
+echo "----------------------------------------------------------------"
+echo "All  processes running. PIDs: ${PIDS[*]}"
+echo "Monitor with: tail -f ${LOG_DIR}/*.log"
+echo "----------------------------------------------------------------"
+
+# Wait for all processes to finish
+for PID in "${PIDS[@]}"; do
+    wait $PID
 done
 
 echo "All Experiments Complete."
