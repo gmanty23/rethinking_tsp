@@ -47,9 +47,17 @@ class GNNLayer(nn.Module):
         self.B = nn.Linear(hidden_dim, hidden_dim, bias=True)
         self.C = nn.Linear(hidden_dim, hidden_dim, bias=True)
 
+        # # For Dual mode, we need a separate weight matrix for Out-Aggregation ---- CONCATENATION AND LINEAR PROJECTION MODE
+        # if self.gnn_direction_mode == 'dual':
+        #     self.V_out = nn.Linear(hidden_dim, hidden_dim, bias=True)
+        #     # NEW: Projection layer to mix concatenated inputs (2 * hidden -> hidden)
+        #     self.project_dual = nn.Linear(hidden_dim * 2, hidden_dim, bias=True)
+
         # For Dual mode, we need a separate weight matrix for Out-Aggregation
         if self.gnn_direction_mode == 'dual':
             self.V_out = nn.Linear(hidden_dim, hidden_dim, bias=True)
+            # NEW: Gating Layer (takes combined input, outputs a score between 0 and 1)
+            self.gate_layer = nn.Linear(hidden_dim * 2, hidden_dim, bias=True)
 
         self.norm_h = {
             "layer": nn.LayerNorm(hidden_dim, elementwise_affine=learn_norm),
@@ -110,18 +118,39 @@ class GNNLayer(nn.Module):
             aggr = self.aggregate(Vh, graph.transpose(1, 2), gates.transpose(1, 2))
             
         elif self.gnn_direction_mode == 'dual':
-            # Bi-directional: Sum of Incoming (V) and Outgoing (V_out)
+            # # Bi-directional: Concatenation of Incoming (V) and Outgoing (V_out)  (at first i used sum, but it gave weird results because od annulation of wind costs)  --- CONCATENATION AND LINEAR PROJECTION MODE
             
-            # 1. Incoming (Standard)
+            # # 1. Incoming (Standard)
+            # Vh_in = prepare_Vh(self.V, h)
+            # aggr_in = self.aggregate(Vh_in, graph, gates)
+            
+            # # 2. Outgoing (Transposed)
+            # Vh_out = prepare_Vh(self.V_out, h)
+            # aggr_out = self.aggregate(Vh_out, graph.transpose(1, 2), gates.transpose(1, 2))
+            
+            # # NEW: Concatenate and Project
+            # # Stack features side-by-side [Batch, Nodes, 2*Hidden]
+            # aggr_cat = torch.cat([aggr_in, aggr_out], dim=-1)
+            # # Project back to [Batch, Nodes, Hidden]
+            # aggr = self.project_dual(aggr_cat)
+
+            # 1. Incoming (Standard/Forward)
             Vh_in = prepare_Vh(self.V, h)
             aggr_in = self.aggregate(Vh_in, graph, gates)
             
-            # 2. Outgoing (Transposed)
-            # Note: We use the separate weight matrix V_out
+            # 2. Outgoing (Backward)
             Vh_out = prepare_Vh(self.V_out, h)
             aggr_out = self.aggregate(Vh_out, graph.transpose(1, 2), gates.transpose(1, 2))
             
-            aggr = aggr_in + aggr_out
+            # 3. Gated Fusion
+            # Stack inputs
+            concat = torch.cat([aggr_in, aggr_out], dim=-1)
+            # Calculate Gate z (sigmoid forces it between 0 and 1)
+            z = torch.sigmoid(self.gate_layer(concat))
+            
+            # Weighted Sum: If z=1, use Forward. If z=0, use Backward.
+            aggr = z * aggr_in + (1 - z) * aggr_out
+
             
         else:
             raise ValueError(f"Unknown gnn_direction_mode: {self.gnn_direction_mode}")

@@ -14,7 +14,7 @@ ENTROPY_VALUES=(0.05 0.1)
 FEATURE_TYPES=("learned" "hybrid")
 
 # --- DATA SETTINGS ---
-VAL_DATA="data/windy_tsp/windy_tsp20_val.pkl"
+VAL_DATA="data/windy_tsp/windy_tsp20_val_exp2.pkl"
 VAL_SIZE=5120
 EPOCH_SIZE=1280000 
 ROLLOUT_SIZE=10240
@@ -80,7 +80,7 @@ else
 fi
 
 # ==================================================
-# 3. PARALLEL EXECUTION (6 RUNS SIMULTANEOUSLY)
+# 3. PARALLEL EXECUTION (RUNS SIMULTANEOUSLY)
 # ==================================================
 echo "=================================================="
 echo "Launching 4 parallel experiments..."
