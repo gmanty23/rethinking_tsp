@@ -1,29 +1,34 @@
 #!/bin/bash
 
-# --- HARDWARE CONFIGURATION (Optimized for RTX 5080 + 24 Cores) ---
-# TSP-50 requires more memory. 128 is safe. 
+# --- HARDWARE CONFIGURATION (Safe Mode) ---
+# Batch Size 1024 fits your VRAM usage based on previous runs.
 BATCH_SIZE=256
-
-# 3 Parallel Runs * 6 Workers = 18 threads. Leaves 6 cores for OS/Overhead.
+# 3 parallel runs * 6 workers = 18 cores (leaving headroom).
 NUM_WORKERS=6
 
 # --- EXPERIMENT SETTINGS ---
 EPOCHS=100
 PROBLEM="windy_tsp"
 GRAPH_SIZE=50 
-ENTROPY_VALUES=(0.01 0.05 0.1 0.2 1.0)
-FEATURE_TYPES=("coords" "learned" "hybrid")
 
-# --- DATA SETTINGS (TSP-50) ---
+# FIXED SETTINGS (Based on Exp 1 Results)
+ENTROPY=0.05
+FEATURE_TYPE="hybrid"
+
+# EXPERIMENTAL VARIABLES (The "Independent Variables")
+# forward:  Messages flow A -> B (Standard)
+# backward: Messages flow B -> A (Against wind/edge)
+# dual:     Messages flow both ways (Bidirectional/Concatenated)
+DIRECTION_MODES=("forward" "backward" "dual")
+
+# --- DATA SETTINGS ---
 VAL_DATA="data/windy_tsp/windy_tsp50_val.pkl"
-
-# Adjusted sizes for TSP-50 training speed
 VAL_SIZE=2560
 EPOCH_SIZE=640000 
 ROLLOUT_SIZE=2560
 
 # Setup directories
-LOG_DIR="logs_tsp50_final"
+LOG_DIR="logs_windy_msg_passing"
 mkdir -p $LOG_DIR
 mkdir -p data/windy_tsp
 mkdir -p results/lkh_windy
@@ -52,8 +57,8 @@ fi
 # ==================================================
 # 2. PRE-COMPUTE OPTIMAL BASELINE (LKH)
 # ==================================================
-LKH_TARGET="results/lkh_windy/$(basename $VAL_DATA .pkl)_lkh.pkl"
-TEMP_RESULTS_DIR="results/windy_tsp50_val"
+LKH_TARGET="results/lkh_windy/$(basename $VAL_DATA .pkl).pkl"
+TEMP_RESULTS_DIR="results/windy_tsp50_exp2_val"
 
 # Check if LKH solution already exists
 if [ ! -f "$LKH_TARGET" ]; then
@@ -82,64 +87,58 @@ else
     echo "LKH Target already exists, skipping generation."
 fi
 
+
 # ==================================================
-# 3. BATCHED PARALLEL EXECUTION
+# 3. PARALLEL EXECUTION (3 RUNS)
 # ==================================================
 echo "=================================================="
-echo "Starting Execution: 3 Parallel Jobs at a time"
+echo "Launching 3 parallel experiments for Message Passing..."
 echo "=================================================="
 
-# We loop through Entropy sequentially, but run Feature Types in parallel.
-# This keeps us at 3 concurrent jobs max.
+PIDS=()
 
-for ENTROPY in "${ENTROPY_VALUES[@]}"; do
-    
-    echo "----------------------------------------------------------------"
-    echo "Starting Batch for Entropy: $ENTROPY"
-    echo "----------------------------------------------------------------"
-    
-    PIDS=()
-    
-    for TYPE in "${FEATURE_TYPES[@]}"; do
+for MODE in "${DIRECTION_MODES[@]}"; do
         
-        RUN_NAME="tsp50_${TYPE}_ent${ENTROPY}"
-        LOG_FILE="${LOG_DIR}/${RUN_NAME}.log"
-        
-        echo " -> Launching: $TYPE | Entropy: $ENTROPY"
-
-        python -u run.py \
-            --problem $PROBLEM \
-            --min_size $GRAPH_SIZE \
-            --max_size $GRAPH_SIZE \
-            --n_epochs $EPOCHS \
-            --batch_size $BATCH_SIZE \
-            --epoch_size $EPOCH_SIZE \
-            --val_datasets $VAL_DATA \
-            --val_size $VAL_SIZE \
-            --rollout_size $ROLLOUT_SIZE \
-            --model attention \
-            --encoder gnn \
-            --gated \
-            --gnn_direction_mode forward \
-            --normalization layer \
-            --num_workers $NUM_WORKERS \
-            --no_progress_bar \
-            --entropy_coeff $ENTROPY \
-            --node_feature_type $TYPE \
-            --run_name "$RUN_NAME" \
-            > "$LOG_FILE" 2>&1 &
-        
-        PIDS+=($!)
-        sleep 5 # Stagger start to stabilize VRAM allocation
-    done
+    RUN_NAME="msg_${MODE}_${FEATURE_TYPE}_ent${ENTROPY}"
+    LOG_FILE="${LOG_DIR}/${RUN_NAME}.log"
     
-    echo "Waiting for batch (Entropy $ENTROPY) to finish..."
-    echo "Monitor with: tail -f ${LOG_DIR}/*.log"
+    echo " -> Launching: Mode=$MODE | Feat=$FEATURE_TYPE | Ent=$ENTROPY"
 
-    # Wait for these 3 specific PIDs to finish before starting the next entropy
-    wait "${PIDS[@]}"
-    echo "Batch Complete."
-
+    # Using -u for unbuffered output
+    python -u run.py \
+        --problem $PROBLEM \
+        --min_size $GRAPH_SIZE \
+        --max_size $GRAPH_SIZE \
+        --n_epochs $EPOCHS \
+        --batch_size $BATCH_SIZE \
+        --epoch_size $EPOCH_SIZE \
+        --val_datasets $VAL_DATA \
+        --val_size $VAL_SIZE \
+        --rollout_size $ROLLOUT_SIZE \
+        --model attention \
+        --encoder gnn \
+        --gated \
+        --normalization layer \
+        --num_workers $NUM_WORKERS \
+        --no_progress_bar \
+        --entropy_coeff $ENTROPY \
+        --node_feature_type $FEATURE_TYPE \
+        --gnn_direction_mode $MODE \
+        --run_name "$RUN_NAME" \
+        > "$LOG_FILE" 2>&1 &
+    
+    PIDS+=($!)
+    sleep 5 # Slight delay to offset initial GPU memory allocation
 done
 
-echo "All Experiments Complete."
+echo "----------------------------------------------------------------"
+echo "All processes running. PIDs: ${PIDS[*]}"
+echo "Monitor with: tail -f ${LOG_DIR}/*.log"
+echo "----------------------------------------------------------------"
+
+# Wait for all processes to finish
+for PID in "${PIDS[@]}"; do
+    wait $PID
+done
+
+echo "Message Passing Experiment Complete."

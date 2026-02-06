@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # Define Paths
-VAL_DATA="data/windy_tsp/windy_tsp20_val.pkl"
-OUT_CSV="results/experiment1_final.csv"
-LOG_FILE="results/eval_run_log.txt"  # <--- New Log File
+VAL_DATA="data/windy_tsp/windy_tsp50_val.pkl"
+OUT_CSV="results/experiment1_final_TSP50.csv"
+LOG_FILE="results/eval_run_log_TSP50.txt"  # <--- New Log File
 
 # Collect all epoch-99 models
-MODELS=$(ls outputs/windy_tsp_20-20/001_exp1_solving_wind_and_embeddings/*/*/epoch-99.pt)
+MODELS=$(ls outputs/windy_tsp_50-50/004_exp1_eval_TSP50/*/*/epoch-99.pt)
 
 echo "Starting Evaluation..." | tee -a "$LOG_FILE"
 echo "Models found: $(echo "$MODELS" | wc -l)" | tee -a "$LOG_FILE"
