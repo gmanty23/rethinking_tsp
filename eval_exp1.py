@@ -33,11 +33,12 @@ def ensure_lkh_baseline(dataset_path, val_size):
     
     # Match the path structure used in your scripts: results/dataset_name/filename.pkl
     lkh_dir = os.path.join("results", dataset_name_no_ext)
-    
+    # lkh_dir = "/home/pfc/gms/code/rethinking_tsp/results/lkh_windy"
     # Construct filename e.g. windy_tsp20_valn1280-lkh_windy.pkl
     lkh_filename = f"{dataset_name_no_ext}n{val_size}-lkh_windy.pkl"
     lkh_file_path = os.path.join(lkh_dir, lkh_filename)
-    
+    # lkh_file_path = "/home/pfc/gms/code/rethinking_tsp/results/lkh_windy/windy_tsp50_val_lkh.pkl"
+
     # 1. Check if file exists
     if not os.path.isfile(lkh_file_path):
         print(f"[-] LKH Baseline not found at {lkh_file_path}")
@@ -180,15 +181,21 @@ def eval_dataset(model, dataset, lkh_costs, decode_strategy, width, softmax_temp
     avg_conf = confs.mean()
 
     # Calculate Gap if Baseline exists
-    avg_gap = 0.0
+    gap_mean_of_ratios = 0.0
+    gap_ratio_of_means = 0.0
+
     if lkh_costs is not None:
         if len(lkh_costs) == len(costs):
+            # 1. Mean of Ratios (Eval Standard): Average of individual gaps
             gaps = ((costs / lkh_costs) - 1) * 100
-            avg_gap = gaps.mean()
+            gap_mean_of_ratios = gaps.mean()
+
+            # 2. Ratio of Means (Train Standard): Gap of the totals
+            gap_ratio_of_means = ((costs.sum() / lkh_costs.sum()) - 1) * 100
         else:
             print(f"Size mismatch: LKH {len(lkh_costs)} vs Pred {len(costs)}. Gap not calculated.")
 
-    return avg_cost, avg_gap, avg_time, avg_conf
+    return avg_cost, gap_mean_of_ratios, gap_ratio_of_means, avg_time, avg_conf
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -237,15 +244,15 @@ if __name__ == "__main__":
     with open(opts.csv_out, mode='w' if not file_exists else 'a', newline='') as f:
         writer = csv.writer(f)
         if not file_exists:
-            writer.writerow(['Model_Name', 'Strategy', 'Width', 'Avg_Cost', 'Gap_Percent', 'Time_Per_Inst', 'Avg_Confidence'])
+            # CHANGED HEADER
+            writer.writerow(['Model_Name', 'Strategy', 'Width', 'Avg_Cost', 'Gap_MoR', 'Gap_RoM', 'Time_Per_Inst', 'Avg_Confidence'])
     
     # Write LKH as its own Row (Reference)
-    # We write this once per script run to ensure the baseline is visible for this session
     if lkh_times is not None:
         with open(opts.csv_out, mode='a', newline='') as f:
             writer = csv.writer(f)
-            # LKH row format: Name="LKH_Baseline", Strategy="opt", Width=0, Cost=lkh_avg, Gap=0, Time=lkh_time, Conf=1.0
-            writer.writerow(['LKH_Baseline', 'opt', 0, f"{lkh_cost_avg:.4f}", "0.0000", f"{lkh_time_avg:.4f}", "1.0000"])
+            # CHANGED LKH ROW (Added an extra "0.0000" to align columns)
+            writer.writerow(['LKH_Baseline', 'opt', 0, f"{lkh_cost_avg:.4f}", "0.0000", "0.0000", f"{lkh_time_avg:.4f}", "1.0000"])
 
     # --- MAIN LOOP ---
     for model_path in opts.models:
@@ -258,13 +265,37 @@ if __name__ == "__main__":
         model_name = os.path.basename(model_dir)
 
         print(f"Loading Model: {model_name} (Epoch {epoch})...")
-        model, _ = load_model(model_dir, epoch=epoch)
+        model, train_opts = load_model(model_dir, epoch=epoch)
+
+        # 1. Detect Mode from Filename
+        if "learned" in model_name:
+            detected_mode = "learned"
+        elif "hybrid" in model_name:
+            detected_mode = "hybrid"
+        elif "coords" in model_name:
+            detected_mode = "coords"
+        else:
+            print(f"[!] Warning: Could not detect mode from name '{model_name}'. Defaulting to 'coords'.")
+            detected_mode = "coords"
+
+        # 2. Detect Neighbors (Assume Full Graph / None unless specified)
+        # If you know you trained with KNN, change this default to 20
+        eval_neighbors = None
+
+        print(f"Detected Feature Type: {detected_mode} | Neighbors: {eval_neighbors}")
         
         # Generate Dataset (Once per model to ensure correct feature type usage)
         # Note: model.problem.make_dataset uses the model's args (coords/hybrid/etc) automatically
+        # Generate Dataset matching the run.py style
         dataset = model.problem.make_dataset(
-            filename=opts.dataset, batch_size=opts.batch_size, num_samples=opts.val_size, 
-            neighbors=20, knn_strat='percentage' # Standard defaults
+            filename=opts.dataset, 
+            batch_size=opts.batch_size, 
+            num_samples=opts.val_size, 
+            neighbors=eval_neighbors, 
+            knn_strat=getattr(train_opts, 'knn_strat', None),
+            node_feature_type=detected_mode, 
+            supervised=True, 
+            nar=False
         )
 
         for width in opts.widths:
@@ -275,16 +306,18 @@ if __name__ == "__main__":
             
             print(f"  -> Running {strategy.upper()} width={width}...")
             
-            cost, gap, duration, conf = eval_dataset(
+            # CHANGED: Unpack 5 values instead of 4
+            cost, gap_mor, gap_rom, duration, conf = eval_dataset(
                 model, dataset, lkh_costs, strategy, width, 1.0, opts, device
             )
             
-            # Write to CSV immediately - OPTION B: Removed lkh_time_avg from this row
+            # Write to CSV immediately
             with open(opts.csv_out, mode='a', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow([model_name, strategy, width, f"{cost:.4f}", f"{gap:.4f}", f"{duration:.4f}", f"{conf:.4f}"])
+                # CHANGED: Write both gaps
+                writer.writerow([model_name, strategy, width, f"{cost:.4f}", f"{gap_mor:.4f}", f"{gap_rom:.4f}", f"{duration:.4f}", f"{conf:.4f}"])
             
-            # Console Log: Cleaned up LKH time from the loop print as requested (implicitly) to focus on model
-            print(f"     Gap: {gap:.2f}% | Time: {duration:.4f}s")
+            # Console Log
+            print(f"     Gap (MoR): {gap_mor:.2f}% | Gap (RoM): {gap_rom:.2f}% | Time: {duration:.4f}s")
 
     print(f"\nResults saved to {opts.csv_out}")

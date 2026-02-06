@@ -53,6 +53,48 @@ def tour_nodes_to_W(tour_nodes):
     tour_edges[tour_nodes[0]][j] = 1
     return tour_edges
 
+def get_wind_knn_graph(nodes, neighbors, knn_strat, cost_matrix):
+    """
+    New function specifically for Windy TSP.
+    Calculates KNN based on Asymmetric Cost Matrix (Wind), not Euclidean distance.
+    
+    Args:
+        nodes: Node coordinates (not used here, but kept for interface consistency if needed)
+        neighbors: Number of neighbors (k) or percentage
+        knn_strat: 'percentage' or None (fixed number)
+        cost_matrix: (N x N) numpy array of directional costs
+        
+    Returns:
+        graph: (N x N) adjacency matrix (0 = edge exists, 1 = no edge)
+    """
+    num_nodes = len(nodes)
+    
+    # 1. Determine number of neighbors k
+    if knn_strat == 'percentage':
+        k = int(num_nodes * neighbors)
+    else:
+        k = neighbors
+        
+    # Guard clause: If k is too high, return fully connected (all zeros)
+    if k >= num_nodes - 1 or k == -1:
+        return np.zeros((num_nodes, num_nodes))
+
+    # 2. Calculate Nearest Neighbors based on COST, not DISTANCE
+
+    knn_indices = np.argsort(cost_matrix, axis=1)[:, 1:k+1] 
+
+    # 3. Build the Adjacency Matrix
+    # Start with all 1s (Disconnected)
+    W = np.ones((num_nodes, num_nodes))
+    
+    # Set the diagonal to 1 (Self-loops are usually ignored or handled elsewhere, 
+    # but strictly speaking graph[i,i] is often 0 or 1 depending on implementation. 
+    # The original code usually sets the graph connections to 0.)
+    
+    for i in range(num_nodes):
+        W[i, knn_indices[i]] = 0
+        
+    return W
 
 class TSP(object):
     """Class representing the Standard Symmetric Travelling Salesman Problem
@@ -372,9 +414,15 @@ class TSPDataset(Dataset):
                 stat_in_max       # 12
             ], axis=-1)
             
+            # --- Use wind costs for graph generation ---
+            if self.neighbors is not None:
+                graph_bytes = get_wind_knn_graph(loc, self.neighbors, self.knn_strat, costs)
+            else:
+                graph_bytes = np.zeros((num_nodes, num_nodes)) # Fully connected fallback
+            
             return {
                 'nodes': torch.FloatTensor(nodes_feature),
-                'graph': torch.ByteTensor(nearest_neighbor_graph(loc, self.neighbors, self.knn_strat)),
+                'graph': torch.ByteTensor(graph_bytes),
                 'cost_matrix': torch.FloatTensor(norm_costs)
             }
             
