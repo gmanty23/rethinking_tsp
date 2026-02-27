@@ -144,7 +144,7 @@ def load_model(path, epoch=None, extra_logging=False):
         checkpoint_encoder=args['checkpoint_encoder'],
         shrink_size=args['shrink_size'],
         extra_logging=extra_logging,
-        
+
         # Restore Windy TSP arguments from saved args.json
         node_feature_type=args.get('node_feature_type', 'coords'),
         gnn_direction_mode=args.get('gnn_direction_mode', 'forward')

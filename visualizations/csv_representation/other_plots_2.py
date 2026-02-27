@@ -75,7 +75,7 @@ def plot_feature_impact(df):
                    fontsize=10, fontweight='bold')
 
     plt.title("Feature Importance: Impact of Input Data on Solution Quality\n(Comparing Best Config per Architecture)", fontsize=14, fontweight='bold')
-    plt.ylabel("Optimality Gap (%) (Lower is Better)", fontsize=12)
+    plt.ylabel("Optimality Gap (%)", fontsize=12)
     plt.xlabel("Model Architecture", fontsize=12)
     plt.legend(title="Decoding Strategy", loc='upper right')
     

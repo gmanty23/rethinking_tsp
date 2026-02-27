@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # --- HARDWARE CONFIGURATION (Optimized for RTX 5080 + 24 Cores) ---
-# Running sequentially allows us to dedicate more resources to the single active job.
+# Running 2 in parallel: We split workers to avoid CPU bottleneck
 BATCH_SIZE=256
-NUM_WORKERS=10  # Increased from 6 -> 10 since we are not splitting cores across 3 jobs
+NUM_WORKERS=6  # Reduced from 10 -> 5 to allow 2 runs to share 24 cores effectively
 
 # --- EXPERIMENT SETTINGS ---
 EPOCHS=100
@@ -73,36 +73,31 @@ else
 fi
 
 # ==================================================
-# 3. SEQUENTIAL EXECUTION
+# 3. PARALLEL EXECUTION (2 JOBS)
 # ==================================================
 echo "=================================================="
-echo "Starting Execution: Sequential Runs (Fully Connected)"
+echo "Starting Execution: Parallel Runs (Max 2 simultaneous)"
 echo "=================================================="
 
 for ENTROPY in "${ENTROPY_VALUES[@]}"; do
-    
-    echo "----------------------------------------------------------------"
-    echo "Starting Batch for Entropy: $ENTROPY"
-    echo "----------------------------------------------------------------"
-    
     for TYPE in "${FEATURE_TYPES[@]}"; do
         
-        # We have already computed coords 0.01,0.1 and 0.05; hybrid 0.01, and 0.05; learned 0.01, and 0.05; si we can skip those to save time
         if [[ ("$TYPE" == "coords" && ( "$ENTROPY" == "0.01" || "$ENTROPY" == "0.05" || "$ENTROPY" == "0.1" )) || 
               ("$TYPE" == "hybrid" && ( "$ENTROPY" == "0.01" || "$ENTROPY" == "0.05" || "$ENTROPY" == "0.1" )) || 
               ("$TYPE" == "learned" && ( "$ENTROPY" == "0.01" || "$ENTROPY" == "0.05" || "$ENTROPY" == "0.1" )) ]]; then
-            echo "Skipping $TYPE with Entropy $ENTROPY (already computed)"
+            echo "Skipping $TYPE with Entropy $ENTROPY"
             continue
         fi  
         
         RUN_NAME="tsp50_fully_connected_${TYPE}_ent${ENTROPY}"
         LOG_FILE="${LOG_DIR}/${RUN_NAME}.log"
 
-        
         echo " -> Launching: $TYPE | Entropy: $ENTROPY"
-        echo "    Logging to: $LOG_FILE"
 
-        # Note: '&' removed to enforce sequential execution
+        #show the tail command for monitoring
+        echo "    To monitor progress: tail -f $LOG_FILE"
+
+        # Launch in background
         python -u run.py \
             --problem $PROBLEM \
             --min_size $GRAPH_SIZE \
@@ -124,13 +119,15 @@ for ENTROPY in "${ENTROPY_VALUES[@]}"; do
             --node_feature_type $TYPE \
             --run_name "$RUN_NAME" \
             --neighbors 50 \
-            > "$LOG_FILE" 2>&1
+            > "$LOG_FILE" 2>&1 &
         
-        echo "    Finished $RUN_NAME"
+        # Limit to 2 parallel jobs
+        if [[ $(jobs -r -p | wc -l) -ge 2 ]]; then
+            wait -n
+        fi
     done
-    
-    echo "Completed all types for Entropy $ENTROPY"
-
 done
 
+# Wait for the last remaining background job to finish
+wait
 echo "All Experiments Complete."

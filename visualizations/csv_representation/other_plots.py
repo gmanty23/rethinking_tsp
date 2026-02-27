@@ -119,7 +119,7 @@ def plot_confidence_calibration(df):
     )
     
     plt.title("Confidence vs. Competence Calibration", fontsize=14, fontweight='bold')
-    plt.ylabel("Optimality Gap (%) (Lower is Better)", fontsize=12)
+    plt.ylabel("Optimality Gap (%) Is Better)", fontsize=12)
     plt.xlabel("Average Model Confidence (Higher is Surer)", fontsize=12)
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     

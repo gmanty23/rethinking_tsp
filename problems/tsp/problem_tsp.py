@@ -68,7 +68,6 @@ def get_wind_knn_graph(nodes, neighbors, knn_strat, cost_matrix):
         graph: (N x N) adjacency matrix (0 = edge exists, 1 = no edge)
     """
     num_nodes = len(nodes)
-    
     # 1. Determine number of neighbors k
     if knn_strat == 'percentage':
         k = int(num_nodes * neighbors)

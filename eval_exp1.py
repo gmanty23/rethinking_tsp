@@ -219,6 +219,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_workers', type=int, default=0, help='Num workers')
     parser.add_argument('--seed', type=int, default=1234, help='Random seed')
 
+
     opts = parser.parse_args()
 
     # Setup Device
@@ -280,10 +281,12 @@ if __name__ == "__main__":
 
         # 2. Detect Neighbors (Assume Full Graph / None unless specified)
         # If you know you trained with KNN, change this default to 20
-        eval_neighbors = None
-
-        print(f"Detected Feature Type: {detected_mode} | Neighbors: {eval_neighbors}")
-        
+        eval_neighbors = train_opts.get('neighbors', 20)
+        eval_knn_strat= train_opts.get('knn_strat', 'None')
+        # print(train_opts)
+        # wait = input("Press Enter to continue with these settings...")
+        print(f"Detected Feature Type: {detected_mode} | Neighbors: {eval_neighbors} | KNN Strat: {eval_knn_strat}")
+        # wait = input("Press Enter to confirm and continue...")
         # Generate Dataset (Once per model to ensure correct feature type usage)
         # Note: model.problem.make_dataset uses the model's args (coords/hybrid/etc) automatically
         # Generate Dataset matching the run.py style
@@ -291,8 +294,8 @@ if __name__ == "__main__":
             filename=opts.dataset, 
             batch_size=opts.batch_size, 
             num_samples=opts.val_size, 
-            neighbors=eval_neighbors, 
-            knn_strat=getattr(train_opts, 'knn_strat', None),
+            neighbors=eval_neighbors,
+            knn_strat=eval_knn_strat,
             node_feature_type=detected_mode, 
             supervised=True, 
             nar=False

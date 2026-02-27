@@ -14,6 +14,7 @@ echo "Models found: $(echo "$MODELS" | wc -l)" | tee -a "$LOG_FILE"
 # Run Python Script
 # 1. Removed '--no_progress_bar' so you see the bar on screen.
 # 2. Added '| tee -a $LOG_FILE' to save the text summary (Gaps, Times) to a file.
+# 3. Add KNN neigbours of 20 with strat none for evaluation (to match training conditions)
 python eval_exp1.py \
     "$VAL_DATA" \
     --models $MODELS \

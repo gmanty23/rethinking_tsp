@@ -5,7 +5,7 @@
 # ==================================================
 # Batch Size 1024 for faster sequential processing.
 # If you get OOM (Out of Memory), reduce to 512.
-BATCH_SIZE=128
+BATCH_SIZE=64
 NUM_WORKERS=6
 
 # --- EXPERIMENT SETTINGS ---
@@ -101,31 +101,39 @@ for FEAT in "${FEATURE_TYPES[@]}"; do
         echo "STARTING RUN: $RUN_NAME" >> "$LOG_FILE"
         echo "----------------------------------------------------------" >> "$LOG_FILE"
         
-        python -u run.py \
-            --problem $PROBLEM \
-            --min_size $GRAPH_SIZE \
-            --max_size $GRAPH_SIZE \
-            --n_epochs $EPOCHS \
-            --batch_size $BATCH_SIZE \
-            --epoch_size $EPOCH_SIZE \
-            --val_datasets $VAL_DATA \
-            --val_size $VAL_SIZE \
-            --rollout_size $ROLLOUT_SIZE \
-            --model attention \
-            --encoder gnn \
-            --gated \
-            --normalization layer \
-            --num_workers $NUM_WORKERS \
-            --no_progress_bar \
-            --entropy_coeff $ENTROPY \
-            --node_feature_type $FEAT \
-            --gnn_direction_mode $FIXED_MODE \
-            --neighbors $NEIGHBORS \
-            --knn_strat $KNN_STRAT \
-            --run_name "$RUN_NAME" \
-            >> "$LOG_FILE" 2>&1
-            
-        echo "    [Done]" | tee -a "$LOG_FILE"
+        {
+            python -u run.py \
+                --problem $PROBLEM \
+                --min_size $GRAPH_SIZE \
+                --max_size $GRAPH_SIZE \
+                --n_epochs $EPOCHS \
+                --batch_size $BATCH_SIZE \
+                --epoch_size $EPOCH_SIZE \
+                --val_datasets $VAL_DATA \
+                --val_size $VAL_SIZE \
+                --rollout_size $ROLLOUT_SIZE \
+                --model attention \
+                --encoder gnn \
+                --gated \
+                --normalization layer \
+                --num_workers $NUM_WORKERS \
+                --no_progress_bar \
+                --entropy_coeff $ENTROPY \
+                --node_feature_type $FEAT \
+                --gnn_direction_mode $FIXED_MODE \
+                --neighbors $NEIGHBORS \
+                --knn_strat $KNN_STRAT \
+                --run_name "$RUN_NAME" \
+                >> "$LOG_FILE" 2>&1
+                
+            echo "    [Done: $RUN_NAME]" | tee -a "$LOG_FILE"
+        } &
+
+        # Limit to 2 parallel background jobs
+        while [ $(jobs -p | wc -l) -ge 2 ]; do
+            sleep 2
+        done
+        
     done
 done
 
@@ -153,37 +161,44 @@ for MODE in "${MODES[@]}"; do
     echo "STARTING RUN: $RUN_NAME" >> "$LOG_FILE"
     echo "----------------------------------------------------------" >> "$LOG_FILE"
     
-    python -u run.py \
-        --problem $PROBLEM \
-        --min_size $GRAPH_SIZE \
-        --max_size $GRAPH_SIZE \
-        --n_epochs $EPOCHS \
-        --batch_size $BATCH_SIZE \
-        --epoch_size $EPOCH_SIZE \
-        --val_datasets $VAL_DATA \
-        --val_size $VAL_SIZE \
-        --rollout_size $ROLLOUT_SIZE \
-        --model attention \
-        --encoder gnn \
-        --gated \
-        --normalization layer \
-        --num_workers $NUM_WORKERS \
-        --no_progress_bar \
-        --entropy_coeff $FIXED_ENTROPY \
-        --node_feature_type $FIXED_FEAT \
-        --gnn_direction_mode $MODE \
-        --neighbors $NEIGHBORS \
-        --knn_strat $KNN_STRAT \
-        --run_name "$RUN_NAME" \
-        >> "$LOG_FILE" 2>&1
+    {
+        python -u run.py \
+            --problem $PROBLEM \
+            --min_size $GRAPH_SIZE \
+            --max_size $GRAPH_SIZE \
+            --n_epochs $EPOCHS \
+            --batch_size $BATCH_SIZE \
+            --epoch_size $EPOCH_SIZE \
+            --val_datasets $VAL_DATA \
+            --val_size $VAL_SIZE \
+            --rollout_size $ROLLOUT_SIZE \
+            --model attention \
+            --encoder gnn \
+            --gated \
+            --normalization layer \
+            --num_workers $NUM_WORKERS \
+            --no_progress_bar \
+            --entropy_coeff $FIXED_ENTROPY \
+            --node_feature_type $FIXED_FEAT \
+            --gnn_direction_mode $MODE \
+            --neighbors $NEIGHBORS \
+            --knn_strat $KNN_STRAT \
+            --run_name "$RUN_NAME" \
+            >> "$LOG_FILE" 2>&1
+        
+        echo "    [Done: $RUN_NAME]" | tee -a "$LOG_FILE"
+    } &
     
-    echo "    [Done]" | tee -a "$LOG_FILE"
+    # Limit to 2 parallel background jobs
+    while [ $(jobs -p | wc -l) -ge 2 ]; do
+        sleep 2
+    done
     
 done
 
 echo "==================================================" | tee -a "$LOG_FILE"
 echo "STARTING PART B: Message Passing Modes" | tee -a "$LOG_FILE"
-echo "Fixed Feature: hybrid | Fixed Entropy: 0.01" | tee -a "$LOG_FILE"
+echo "Fixed Feature: hybrid | Fixed Entropy: 0.05" | tee -a "$LOG_FILE"
 echo "==================================================" | tee -a "$LOG_FILE"
 
 MODES=("forward" "backward" "dual")
@@ -204,33 +219,44 @@ for MODE in "${MODES[@]}"; do
     # to tail the log file for monitoring
     echo "    To monitor progress: tail -f $LOG_FILE" | tee -a "$LOG_FILE"
 
-    python -u run.py \
-        --problem $PROBLEM \
-        --min_size $GRAPH_SIZE \
-        --max_size $GRAPH_SIZE \
-        --n_epochs $EPOCHS \
-        --batch_size $BATCH_SIZE \
-        --epoch_size $EPOCH_SIZE \
-        --val_datasets $VAL_DATA \
-        --val_size $VAL_SIZE \
-        --rollout_size $ROLLOUT_SIZE \
-        --model attention \
-        --encoder gnn \
-        --gated \
-        --normalization layer \
-        --num_workers $NUM_WORKERS \
-        --no_progress_bar \
-        --entropy_coeff $FIXED_ENTROPY \
-        --node_feature_type $FIXED_FEAT \
-        --gnn_direction_mode $MODE \
-        --neighbors $NEIGHBORS \
-        --knn_strat $KNN_STRAT \
-        --run_name "$RUN_NAME" \
-        >> "$LOG_FILE" 2>&1
+    {
+        python -u run.py \
+            --problem $PROBLEM \
+            --min_size $GRAPH_SIZE \
+            --max_size $GRAPH_SIZE \
+            --n_epochs $EPOCHS \
+            --batch_size $BATCH_SIZE \
+            --epoch_size $EPOCH_SIZE \
+            --val_datasets $VAL_DATA \
+            --val_size $VAL_SIZE \
+            --rollout_size $ROLLOUT_SIZE \
+            --model attention \
+            --encoder gnn \
+            --gated \
+            --normalization layer \
+            --num_workers $NUM_WORKERS \
+            --no_progress_bar \
+            --entropy_coeff $FIXED_ENTROPY \
+            --node_feature_type $FIXED_FEAT \
+            --gnn_direction_mode $MODE \
+            --neighbors $NEIGHBORS \
+            --knn_strat $KNN_STRAT \
+            --run_name "$RUN_NAME" \
+            >> "$LOG_FILE" 2>&1
+        
+        echo "    [Done: $RUN_NAME]" | tee -a "$LOG_FILE"
+    } &
     
-    echo "    [Done]" | tee -a "$LOG_FILE"
+    # Limit to 2 parallel background jobs
+    while [ $(jobs -p | wc -l) -ge 2 ]; do
+        sleep 2
+    done
     
 done
+
+# Wait for any remaining background jobs to finish before concluding the script
+wait
+
 echo "==================================================" | tee -a "$LOG_FILE"
 echo "ALL EXPERIMENTS COMPLETE" | tee -a "$LOG_FILE"
 echo "==================================================" | tee -a "$LOG_FILE"

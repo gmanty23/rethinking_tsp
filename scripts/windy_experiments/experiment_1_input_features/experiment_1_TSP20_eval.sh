@@ -2,8 +2,8 @@
 
 # Define Paths
 VAL_DATA="data/windy_tsp/windy_tsp20_val.pkl"
-OUT_CSV="results/experiment1_final.csv"
-LOG_FILE="results/eval_run_log.txt"  # <--- New Log File
+OUT_CSV="results/experiment1_final_TSP20.csv"
+LOG_FILE="results/eval_run_log_TSP20.txt"  # <--- New Log File
 
 # Collect all epoch-99 models
 MODELS=$(ls outputs/windy_tsp_20-20/001_exp1_solving_wind_and_embeddings/*/*/epoch-99.pt)
