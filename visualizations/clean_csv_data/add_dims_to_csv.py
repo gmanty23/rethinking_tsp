@@ -47,8 +47,8 @@ def procesar_archivo(input_path, output_path):
 
 # --- Configuración ---
 # Cambia 'entrada.csv' por la ruta de tu archivo
-archivo_entrada = '/home/pfc/gms/code/rethinking_tsp/results/experiment1_final_TSP50.csv'
-archivo_salida = '/home/pfc/gms/code/rethinking_tsp/results/evaluations/experiment1_final_TSP50_processed.csv'
+archivo_entrada = 'results/experiment1_compknn_TSP20_neighbors_2.csv'
+archivo_salida = 'results/evaluations/experiment1_compknn_TSP20_neighbors_2_processed.csv'
 
 if __name__ == "__main__":
     procesar_archivo(archivo_entrada, archivo_salida)

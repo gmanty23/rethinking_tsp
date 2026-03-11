@@ -16,8 +16,8 @@ def nearest_neighbor_graph(nodes, neighbors, knn_strat):
     """Returns k-Nearest Neighbor graph as a **NEGATIVE** adjacency matrix
     """
     num_nodes = len(nodes)
-    # If `neighbors` is a percentage, convert to int
-    if knn_strat == 'percentage':
+# If `neighbors` is a percentage, convert to int
+    if knn_strat in ['percentage', 'random_percentage']:
         neighbors = int(num_nodes * neighbors)
     
     if neighbors >= num_nodes-1 or neighbors == -1:
@@ -55,44 +55,73 @@ def tour_nodes_to_W(tour_nodes):
 
 def get_wind_knn_graph(nodes, neighbors, knn_strat, cost_matrix):
     """
-    New function specifically for Windy TSP.
-    Calculates KNN based on Asymmetric Cost Matrix (Wind), not Euclidean distance.
-    
-    Args:
-        nodes: Node coordinates (not used here, but kept for interface consistency if needed)
-        neighbors: Number of neighbors (k) or percentage
-        knn_strat: 'percentage' or None (fixed number)
-        cost_matrix: (N x N) numpy array of directional costs
-        
-    Returns:
-        graph: (N x N) adjacency matrix (0 = edge exists, 1 = no edge)
+    Calculates Graph Mask based on Asymmetric Cost Matrix (Wind) OR Random Connections.
+    Ensures all nodes have a minimum in-degree to maintain reachability.
     """
     num_nodes = len(nodes)
+    
     # 1. Determine number of neighbors k
-    if knn_strat == 'percentage':
+    if knn_strat in ['percentage', 'random_percentage']:
         k = int(num_nodes * neighbors)
     else:
-        k = neighbors
-        
+        k = int(neighbors)
+    
     # Guard clause: If k is too high, return fully connected (all zeros)
     if k >= num_nodes - 1 or k == -1:
         return np.zeros((num_nodes, num_nodes))
-
-    # 2. Calculate Nearest Neighbors based on COST, not DISTANCE
-
-    knn_indices = np.argsort(cost_matrix, axis=1)[:, 1:k+1] 
-
+        
     # 3. Build the Adjacency Matrix
-    # Start with all 1s (Disconnected)
+    # Start with all 1s (1 = disconnected/masked in this architecture)
     W = np.ones((num_nodes, num_nodes))
     
-    # Set the diagonal to 1 (Self-loops are usually ignored or handled elsewhere, 
-    # but strictly speaking graph[i,i] is often 0 or 1 depending on implementation. 
-    # The original code usually sets the graph connections to 0.)
+    # 4. Connection Selection Logic
+    if knn_strat in ['random', 'random_percentage']:
+        # --- ABLATION: Uniform Random Sparsification ---
+        for i in range(num_nodes):
+            # Get all node indices except the current node 'i'
+            valid_neighbors = np.delete(np.arange(num_nodes), i)
+            # Randomly select 'k' neighbors without replacement
+            rand_indices = np.random.choice(valid_neighbors, size=k, replace=False)
+            W[i, rand_indices] = 0 # 0 = edge exists
+    else:
+        # --- BASELINE: Cost-aware kNN ---
+        # Calculate Nearest Neighbors based on COST
+        knn_indices = np.argsort(cost_matrix, axis=1)[:, 1:k+1]
+        for i in range(num_nodes):
+            W[i, knn_indices[i]] = 0 # 0 = edge exists
+            
+    # --- ENFORCE MINIMUM IN-DEGREE ---
+    # Decide how many edges to reconstruct (10% of k, with a hard minimum of 1)
+    min_in_edges = max(1, int(0.1 * k)) 
+
+    # Summing zeros along columns gives the in-degree of each node
+    in_degrees = np.sum(W == 0, axis=0)
     
-    for i in range(num_nodes):
-        W[i, knn_indices[i]] = 0
-        
+    # Identify nodes that are completely isolated
+    isolated_nodes = np.where(in_degrees == 0)[0] 
+    
+    for j in isolated_nodes:
+        if knn_strat in ['random', 'random_percentage']:
+            # --- Random Reconnection ---
+            # Get all nodes except the target 'j'
+            valid_origins = np.delete(np.arange(num_nodes), j)
+            
+            # Randomly select origins to fulfill the minimum in-degree
+            best_origins = np.random.choice(valid_origins, size=min_in_edges, replace=False)
+        else:
+            # --- Cost-Aware Reconnection ---
+            # Extract costs to travel TO node j from all other nodes i
+            costs_to_j = cost_matrix[:, j].copy()
+            
+            # Mask the self-loop
+            costs_to_j[j] = np.inf 
+            
+            # Find the optimal origin nodes 'i' to reach 'j'
+            best_origins = np.argsort(costs_to_j)[:min_in_edges]
+            
+        # Forcibly open the edges from the selected origins to j
+        W[best_origins, j] = 0
+            
     return W
 
 class TSP(object):

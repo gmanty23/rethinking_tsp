@@ -59,11 +59,6 @@ class GNNLayer(nn.Module):
         #     # NEW: Gating Layer (takes combined input, outputs a score between 0 and 1)
         #     self.gate_layer = nn.Linear(hidden_dim * 2, hidden_dim, bias=True)
 
-        # # For original simple sum version (no gating), 
-        # if self.gnn_direction_mode == 'dual':
-        #     self.V_out = nn.Linear(hidden_dim, hidden_dim, bias=True)
-
-
         self.norm_h = {
             "layer": nn.LayerNorm(hidden_dim, elementwise_affine=learn_norm),
             "batch": nn.BatchNorm1d(hidden_dim, affine=learn_norm, track_running_stats=track_norm)
@@ -125,33 +120,37 @@ class GNNLayer(nn.Module):
         elif self.gnn_direction_mode == 'dual':
             # # Bi-directional: Concatenation of Incoming (V) and Outgoing (V_out)  (at first i used sum, but it gave weird results because od annulation of wind costs)  --- CONCATENATION AND LINEAR PROJECTION MODE
             
-            # 1. Incoming (Standard)
+            # # 1. Incoming (Standard)
+            # Vh_in = prepare_Vh(self.V, h)
+            # aggr_in = self.aggregate(Vh_in, graph, gates)
+            
+            # # 2. Outgoing (Transposed)
+            # Vh_out = prepare_Vh(self.V_out, h)
+            # aggr_out = self.aggregate(Vh_out, graph.transpose(1, 2), gates.transpose(1, 2))
+            
+            # # NEW: Concatenate and Project
+            # # Stack features side-by-side [Batch, Nodes, 2*Hidden]
+            # aggr_cat = torch.cat([aggr_in, aggr_out], dim=-1)
+            # # Project back to [Batch, Nodes, Hidden]
+            # aggr = self.project_dual(aggr_cat)
+
+            # Bi-directional: Gated Fusion of Incoming and Outgoing --- GATED FUSION MODE
+            # 1. Incoming (Standard/Forward)
             Vh_in = prepare_Vh(self.V, h)
             aggr_in = self.aggregate(Vh_in, graph, gates)
             
-            # 2. Outgoing (Transposed)
+            # 2. Outgoing (Backward)
             Vh_out = prepare_Vh(self.V_out, h)
             aggr_out = self.aggregate(Vh_out, graph.transpose(1, 2), gates.transpose(1, 2))
             
-            # NEW: Concatenate and Project
-            # Stack features side-by-side [Batch, Nodes, 2*Hidden]
-            aggr_cat = torch.cat([aggr_in, aggr_out], dim=-1)
-            # Project back to [Batch, Nodes, Hidden]
-            aggr = self.project_dual(aggr_cat)
-
-            # Bi-directional: Gated Fusion of Incoming and Outgoing --- GATED FUSION MODE
-
-            # # 3. Gated Fusion
-            # # Stack inputs
-            # concat = torch.cat([aggr_in, aggr_out], dim=-1)
-            # # Calculate Gate z (sigmoid forces it between 0 and 1)
-            # z = torch.sigmoid(self.gate_layer(concat))
+            # 3. Gated Fusion
+            # Stack inputs
+            concat = torch.cat([aggr_in, aggr_out], dim=-1)
+            # Calculate Gate z (sigmoid forces it between 0 and 1)
+            z = torch.sigmoid(self.gate_layer(concat))
             
-            # # Weighted Sum: If z=1, use Forward. If z=0, use Backward.
-            # aggr = z * aggr_in + (1 - z) * aggr_out
-
-            # Original Simple Sum Version (no gating)
-            aggr = aggr_in + aggr_out
+            # Weighted Sum: If z=1, use Forward. If z=0, use Backward.
+            aggr = z * aggr_in + (1 - z) * aggr_out
 
             
         else:

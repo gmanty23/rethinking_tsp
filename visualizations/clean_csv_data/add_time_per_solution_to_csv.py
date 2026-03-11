@@ -70,8 +70,8 @@ def add_solution_time_column(input_path, output_path, batch_size=128, time_col_n
         print(f"An unexpected error occurred: {e}")
 
 # --- Configuration ---
-input_csv = '/home/pfc/gms/code/rethinking_tsp/results/evaluations/experiment1_final_TSP50_processed.csv'     # The file from the previous step
-output_csv = '/home/pfc/gms/code/rethinking_tsp/results/evaluations/02experiment1_TSP50.csv'         # The new file to create
+input_csv = '/home/pfc/gms/code/rethinking_tsp/results/evaluations/experiment1_compknn_TSP20_neighbors_2_processed.csv'     # The file from the previous step
+output_csv = '/home/pfc/gms/code/rethinking_tsp/results/evaluations/04experiment1_compknn_TSP20_neighbors_2.csv'         # The new file to create
 BATCH_SIZE = 128
 TARGET_COLUMN = 'Time_Per_Inst'        # The name of your bad time column
 

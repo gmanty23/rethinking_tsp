@@ -15,7 +15,7 @@ GRAPH_SIZE=100
 
 # FIX: Use Percentage Strategy (0.2 * 100 = 20 neighbors)
 NEIGHBORS=0.2
-KNN_STRAT="percentage"
+KNN_STRAT="random_percentage"
 
 # FIX: Sizes must be multiples of BATCH_SIZE (1024)
 VAL_SIZE=2048     
@@ -24,13 +24,13 @@ ROLLOUT_SIZE=10240
 
 # --- PATHS ---
 VAL_DATA="data/windy_tsp/windy_tsp100_val.pkl"
-LOG_DIR="logs_windy_tsp100_seq"
+LOG_DIR="logs_windy_tsp100_seq_random"
 mkdir -p $LOG_DIR
 mkdir -p data/windy_tsp
 mkdir -p results/lkh_windy
 
 # *** NEW: SINGLE LOG FILE FOR EVERYTHING ***
-LOG_FILE="${LOG_DIR}/tsp100_sequential_combined.log"
+LOG_FILE="${LOG_DIR}/tsp100_sequential_combined_random.log"
 
 # Initialize Log File
 echo "==================================================" > "$LOG_FILE"

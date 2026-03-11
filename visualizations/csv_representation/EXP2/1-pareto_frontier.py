@@ -187,9 +187,9 @@ def plot_pareto(df):
     size_lines = [mlines.Line2D([], [], color='gray', marker='o', linestyle='', markersize=np.sqrt(s)/1.5) for s in width_map.values()]
     plt.legend(size_lines, ["Greedy", "BS-10", "BS-100", "BS-1280"], title="Strategy", loc='upper left', bbox_to_anchor=(1.02, 0.20))
 
-    plt.tight_layout()
-    plt.subplots_adjust(right=0.78)
-    plt.savefig(OUTPUT_FILE, dpi=300, pad_inches=0.1)
+    plt.subplots_adjust(right=0.82) # Give it just a bit more breathing room on the right
+    # Adding bbox_inches='tight' forces matplotlib to calculate the true bounding box of ALL elements
+    plt.savefig(OUTPUT_FILE, dpi=300, bbox_inches='tight', pad_inches=0.1)
     print(f"Saved to {OUTPUT_FILE}")
     plt.show()
 

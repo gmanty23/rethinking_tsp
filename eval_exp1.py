@@ -18,6 +18,46 @@ from utils import load_model, move_to, get_best
 from utils.functions import parse_softmax_temperature
 from nets.nar_model import NARModel
 
+def compute_embedding_variance(embeddings):
+    """
+    Calcula la varianza espacial promedio de los embeddings de los nodos
+    para medir el over-smoothing en el GNN.
+    Args:
+        embeddings: Tensor de dimensiones (batch_size, num_nodes, embedding_dim)
+    """
+    node_variance = torch.var(embeddings, dim=1, unbiased=False) 
+    mean_variance_per_graph = node_variance.mean(dim=-1) 
+    return mean_variance_per_graph
+
+def compute_dirichlet_energy(embeddings, graph=None):
+    """
+    Calcula la Energía de Dirichlet promedio del batch.
+    A prueba de fallos: Si 'graph' está vacío o es inválido, asume Fully Connected.
+    """
+    B, N, D = embeddings.shape
+    # Distancias cuadradas entre todos los pares: ||h_i - h_j||^2 -> (B, N, N)
+    sq_dists = torch.cdist(embeddings, embeddings, p=2).pow(2)
+    
+    # Máscara por defecto: Fully Connected (todos con todos, excluyendo la diagonal)
+    mask = torch.ones(B, N, N, device=embeddings.device) - torch.eye(N, device=embeddings.device).unsqueeze(0)
+    
+    # Si recibimos un grafo, vamos a limpiarlo y verificar si tiene aristas reales
+    if graph is not None and isinstance(graph, torch.Tensor) and graph.dim() == 3 and graph.shape[1] == N:
+        # 1. Binarizar por si el tensor contiene costes/pesos en lugar de adyacencia
+        binary_graph = (graph != 0).float()
+        
+        # 2. Eliminar las conexiones del nodo consigo mismo (self-loops)
+        binary_graph = binary_graph * mask
+        
+        # 3. Solo usamos este grafo si realmente tiene aristas definidas
+        if binary_graph.sum() > 0:
+            mask = binary_graph
+
+    # Calcular la energía promedio sobre las aristas válidas de la máscara
+    energy_per_graph = (sq_dists * mask).sum(dim=(1, 2)) / (mask.sum(dim=(1, 2)) + 1e-9)
+        
+    return energy_per_graph.mean()
+
 def ensure_lkh_baseline(dataset_path, val_size):
     """
     Checks if LKH baseline exists. If not, it triggers the generation 
@@ -96,6 +136,8 @@ def eval_dataset(model, dataset, lkh_costs, decode_strategy, width, softmax_temp
     dataloader = DataLoader(dataset, batch_size=opts.batch_size, shuffle=False, num_workers=opts.num_workers)
 
     results = []
+    batch_variances = []  # For storing embedding variances per batch
+    batch_energies = []   # NUEVO: Para almacenar la energía de Dirichlet
     
     for batch in tqdm(dataloader, disable=opts.no_progress_bar, ascii=True):
         # Move to GPU
@@ -103,6 +145,25 @@ def eval_dataset(model, dataset, lkh_costs, decode_strategy, width, softmax_temp
         
         start = time.time()
         with torch.no_grad():
+
+            # --- CAPTURE EMBEDDINGS AND CALCULATE VARIANCE & ENERGY ---
+            try:
+                if hasattr(model, 'embedder'):
+                    h = model._init_embed(nodes)
+                    embeddings = model.embedder(h, graph)
+                    
+                    # Varianza
+                    var = compute_embedding_variance(embeddings)
+                    batch_variances.append(var.mean().item())
+                    
+                    # NUEVO: Energía de Dirichlet
+                    # Pasamos 'graph' para que evalúe la topología local si es posible
+                    energy = compute_dirichlet_energy(embeddings, graph)
+                    batch_energies.append(energy.item())
+                    
+            except Exception as e:
+                print(f"\n[!] Error calculando métricas latentes: {e}")
+            # -------------------------------------------------
             
             # --- STRATEGY 1: GREEDY ---
             if decode_strategy == 'greedy':
@@ -195,7 +256,11 @@ def eval_dataset(model, dataset, lkh_costs, decode_strategy, width, softmax_temp
         else:
             print(f"Size mismatch: LKH {len(lkh_costs)} vs Pred {len(costs)}. Gap not calculated.")
 
-    return avg_cost, gap_mean_of_ratios, gap_ratio_of_means, avg_time, avg_conf
+    avg_variance = sum(batch_variances) / len(batch_variances) if batch_variances else 0.0
+    avg_energy = sum(batch_energies) / len(batch_energies) if batch_energies else 0.0 
+
+  
+    return avg_cost, gap_mean_of_ratios, gap_ratio_of_means, avg_time, avg_conf, avg_variance, avg_energy
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -245,15 +310,15 @@ if __name__ == "__main__":
     with open(opts.csv_out, mode='w' if not file_exists else 'a', newline='') as f:
         writer = csv.writer(f)
         if not file_exists:
-            # CHANGED HEADER
-            writer.writerow(['Model_Name', 'Strategy', 'Width', 'Avg_Cost', 'Gap_MoR', 'Gap_RoM', 'Time_Per_Inst', 'Avg_Confidence'])
+            # NUEVO: Añadida 'Avg_Dirichlet_Energy' al final
+            writer.writerow(['Model_Name', 'Strategy', 'Width', 'Avg_Cost', 'Gap_MoR', 'Gap_RoM', 'Time_Per_Inst', 'Avg_Confidence','Avg_Embedding_Variance', 'Avg_Dirichlet_Energy'])
     
     # Write LKH as its own Row (Reference)
     if lkh_times is not None:
         with open(opts.csv_out, mode='a', newline='') as f:
             writer = csv.writer(f)
-            # CHANGED LKH ROW (Added an extra "0.0000" to align columns)
-            writer.writerow(['LKH_Baseline', 'opt', 0, f"{lkh_cost_avg:.4f}", "0.0000", "0.0000", f"{lkh_time_avg:.4f}", "1.0000"])
+            # NUEVO: Añadido otro "0.0000" al final para la energía
+            writer.writerow(['LKH_Baseline', 'opt', 0, f"{lkh_cost_avg:.4f}", "0.0000", "0.0000", f"{lkh_time_avg:.4f}", "1.0000", "0.0000", "0.0000"])
 
     # --- MAIN LOOP ---
     for model_path in opts.models:
@@ -309,18 +374,19 @@ if __name__ == "__main__":
             
             print(f"  -> Running {strategy.upper()} width={width}...")
             
-            # CHANGED: Unpack 5 values instead of 4
-            cost, gap_mor, gap_rom, duration, conf = eval_dataset(
+            # NUEVO: Añadido 'energy' al desempaquetado (7 valores)
+            cost, gap_mor, gap_rom, duration, conf, variance, energy = eval_dataset(
                 model, dataset, lkh_costs, strategy, width, 1.0, opts, device
             )
             
             # Write to CSV immediately
             with open(opts.csv_out, mode='a', newline='') as f:
                 writer = csv.writer(f)
-                # CHANGED: Write both gaps
-                writer.writerow([model_name, strategy, width, f"{cost:.4f}", f"{gap_mor:.4f}", f"{gap_rom:.4f}", f"{duration:.4f}", f"{conf:.4f}"])
+                # NUEVO: Añadido f"{energy:.4f}" al final
+                writer.writerow([model_name, strategy, width, f"{cost:.4f}", f"{gap_mor:.4f}", f"{gap_rom:.4f}", f"{duration:.4f}", f"{conf:.4f}", f"{variance:.4f}", f"{energy:.4f}"])
             
             # Console Log
-            print(f"     Gap (MoR): {gap_mor:.2f}% | Gap (RoM): {gap_rom:.2f}% | Time: {duration:.4f}s")
+            # NUEVO: Añadida la Energía al print
+            print(f"     Gap (MoR): {gap_mor:.2f}% | Gap (RoM): {gap_rom:.2f}% | Time: {duration:.4f}s | Var: {variance:.4f} | Dir. Energy: {energy:.4f}")
 
     print(f"\nResults saved to {opts.csv_out}")

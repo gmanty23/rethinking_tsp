@@ -18,7 +18,7 @@ def get_options(args=None):
     parser.add_argument('--neighbors', type=float, default=20, 
                         help="The k-nearest neighbors for graph sparsification")
     parser.add_argument('--knn_strat', type=str, default=None, 
-                        help="Strategy for k-nearest neighbors (None/'percentage')")
+                        help="Strategy for k-nearest neighbors (None/'random'/'percentage'/'random_percentage')")
     parser.add_argument('--n_epochs', type=int, default=100, 
                         help='The number of epochs to train')
     parser.add_argument('--epoch_size', type=int, default=1000000, 

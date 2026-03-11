@@ -4,7 +4,7 @@
 # HARDWARE & CONFIGURATION
 # ==================================================
 # Batch Size 128 is very safe for TSP20/50 parallel runs.
-BATCH_SIZE=128
+BATCH_SIZE=512
 NUM_WORKERS=6
 
 # --- FIXED EXPERIMENT SETTINGS ---
@@ -22,22 +22,22 @@ EPOCH_SIZE=128000  # 1000 * 128
 ROLLOUT_SIZE=10240 # 80 * 128
 
 # --- VARIABLES TO TEST ---
-SIZES=(50 20)
+SIZES=(20)
 MODES=("forward" "backward" "dual")
-ENTROPY_VALUES=(0.01 0.05 0.1 0.5)
+ENTROPY_VALUES=(0.01 0.05 0.1 0.2)
 
 # --- PATHS ---
-LOG_DIR="logs_windy_tsp_knn_study"
+LOG_DIR="logs_windy_tsp_knn_percentage_study"
 mkdir -p $LOG_DIR
 mkdir -p data/windy_tsp
 mkdir -p results/lkh_windy
 
 # Master Log File
-LOG_FILE="${LOG_DIR}/tsp50_20_parallel_entropy.log"
+LOG_FILE="${LOG_DIR}/tsp50_20_parallel_entropy_percentage_knn.log"
 
 # Initialize Log
 echo "==================================================" > "$LOG_FILE"
-echo "STARTING PARALLEL ENTROPY STUDY (TSP-50 & TSP-20)" >> "$LOG_FILE"
+echo "STARTING PARALLEL PERCENTAGE KNN ENTROPY STUDY (TSP-50 & TSP-20)" >> "$LOG_FILE"
 echo "Batch: $BATCH_SIZE | Parallel: 4 Entropies per Mode" >> "$LOG_FILE"
 echo "Date: $(date)" >> "$LOG_FILE"
 echo "==================================================" >> "$LOG_FILE"
