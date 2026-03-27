@@ -8,8 +8,8 @@ from matplotlib.patches import Patch
 
 # --- Configuration ---
 INPUT_FILE = "results/evaluations/04experiment1_compknn_TSP20_neighbors.csv"
-OUT_VAR = "visualizations/csv_eval/TSP20_EXP4/scatter_variance_vs_gap.png"
-OUT_DIRICHLET = "visualizations/csv_eval/TSP20_EXP4/scatter_dirichlet_vs_gap.png"
+OUT_VAR = "visualizations/csv_eval/TSP20_EXP4/scatter_variance_vs_gap_TODOS.png"
+OUT_DIRICHLET = "visualizations/csv_eval/TSP20_EXP4/scatter_dirichlet_vs_gap_TODOS.png"
 
 def generate_scatter_plots():
     if not os.path.exists(INPUT_FILE):

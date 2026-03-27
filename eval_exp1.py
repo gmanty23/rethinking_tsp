@@ -150,7 +150,7 @@ def eval_dataset(model, dataset, lkh_costs, decode_strategy, width, softmax_temp
             try:
                 if hasattr(model, 'embedder'):
                     h = model._init_embed(nodes)
-                    embeddings = model.embedder(h, graph)
+                    embeddings = model.embedder(h, graph.clone())
                     
                     # Varianza
                     var = compute_embedding_variance(embeddings)
@@ -158,7 +158,7 @@ def eval_dataset(model, dataset, lkh_costs, decode_strategy, width, softmax_temp
                     
                     # NUEVO: Energía de Dirichlet
                     # Pasamos 'graph' para que evalúe la topología local si es posible
-                    energy = compute_dirichlet_energy(embeddings, graph)
+                    energy = compute_dirichlet_energy(embeddings, graph.clone())
                     batch_energies.append(energy.item())
                     
             except Exception as e:
@@ -243,6 +243,7 @@ def eval_dataset(model, dataset, lkh_costs, decode_strategy, width, softmax_temp
 
     # Calculate Gap if Baseline exists
     gap_mean_of_ratios = 0.0
+    gap_std_of_ratios = 0.0
     gap_ratio_of_means = 0.0
 
     if lkh_costs is not None:
@@ -250,7 +251,7 @@ def eval_dataset(model, dataset, lkh_costs, decode_strategy, width, softmax_temp
             # 1. Mean of Ratios (Eval Standard): Average of individual gaps
             gaps = ((costs / lkh_costs) - 1) * 100
             gap_mean_of_ratios = gaps.mean()
-
+            gap_std_of_ratios = gaps.std()
             # 2. Ratio of Means (Train Standard): Gap of the totals
             gap_ratio_of_means = ((costs.sum() / lkh_costs.sum()) - 1) * 100
         else:
@@ -260,7 +261,7 @@ def eval_dataset(model, dataset, lkh_costs, decode_strategy, width, softmax_temp
     avg_energy = sum(batch_energies) / len(batch_energies) if batch_energies else 0.0 
 
   
-    return avg_cost, gap_mean_of_ratios, gap_ratio_of_means, avg_time, avg_conf, avg_variance, avg_energy
+    return avg_cost, gap_mean_of_ratios, gap_std_of_ratios, gap_ratio_of_means, avg_time, avg_conf, avg_variance, avg_energy
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -310,15 +311,14 @@ if __name__ == "__main__":
     with open(opts.csv_out, mode='w' if not file_exists else 'a', newline='') as f:
         writer = csv.writer(f)
         if not file_exists:
-            # NUEVO: Añadida 'Avg_Dirichlet_Energy' al final
-            writer.writerow(['Model_Name', 'Strategy', 'Width', 'Avg_Cost', 'Gap_MoR', 'Gap_RoM', 'Time_Per_Inst', 'Avg_Confidence','Avg_Embedding_Variance', 'Avg_Dirichlet_Energy'])
+            writer.writerow(['Model_Name', 'Strategy', 'Width', 'Avg_Cost', 'Gap_MoR', 'Gap_STDoR', 'Gap_RoM', 'Time_Per_Inst', 'Avg_Confidence','Avg_Embedding_Variance', 'Avg_Dirichlet_Energy'])
     
     # Write LKH as its own Row (Reference)
     if lkh_times is not None:
         with open(opts.csv_out, mode='a', newline='') as f:
             writer = csv.writer(f)
             # NUEVO: Añadido otro "0.0000" al final para la energía
-            writer.writerow(['LKH_Baseline', 'opt', 0, f"{lkh_cost_avg:.4f}", "0.0000", "0.0000", f"{lkh_time_avg:.4f}", "1.0000", "0.0000", "0.0000"])
+            writer.writerow(['LKH_Baseline', 'opt', 0, f"{lkh_cost_avg:.4f}", f"0.0000", f"0.0000", "0.0000", f"{lkh_time_avg:.4f}", "1.0000", "0.0000", "0.0000"])
 
     # --- MAIN LOOP ---
     for model_path in opts.models:
@@ -375,7 +375,7 @@ if __name__ == "__main__":
             print(f"  -> Running {strategy.upper()} width={width}...")
             
             # NUEVO: Añadido 'energy' al desempaquetado (7 valores)
-            cost, gap_mor, gap_rom, duration, conf, variance, energy = eval_dataset(
+            cost, gap_mor, std_mor, gap_rom, duration, conf, variance, energy = eval_dataset(
                 model, dataset, lkh_costs, strategy, width, 1.0, opts, device
             )
             
@@ -383,8 +383,7 @@ if __name__ == "__main__":
             with open(opts.csv_out, mode='a', newline='') as f:
                 writer = csv.writer(f)
                 # NUEVO: Añadido f"{energy:.4f}" al final
-                writer.writerow([model_name, strategy, width, f"{cost:.4f}", f"{gap_mor:.4f}", f"{gap_rom:.4f}", f"{duration:.4f}", f"{conf:.4f}", f"{variance:.4f}", f"{energy:.4f}"])
-            
+                writer.writerow([model_name, strategy, width, f"{cost:.4f}", f"{gap_mor:.4f}", f"{std_mor:.4f}", f"{gap_rom:.4f}", f"{duration:.4f}", f"{conf:.4f}", f"{variance:.4f}", f"{energy:.4f}"])            
             # Console Log
             # NUEVO: Añadida la Energía al print
             print(f"     Gap (MoR): {gap_mor:.2f}% | Gap (RoM): {gap_rom:.2f}% | Time: {duration:.4f}s | Var: {variance:.4f} | Dir. Energy: {energy:.4f}")

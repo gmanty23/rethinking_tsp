@@ -1,0 +1,21 @@
+# Deep Learning & GPU
+torch==2.9.1
+torchaudio==2.9.1
+torchvision==0.24.1
+tensorboard==2.20.0
+
+# Scientific & Graph Computing
+numpy==1.26.4
+scipy==1.15.3
+networkx==3.4.2
+pandas==2.3.3
+scikit-learn==1.7.2
+numba==0.64.0
+pycombinatorial==2.1.8
+
+# Visualization & Utilities
+matplotlib==3.10.7
+seaborn==0.13.2
+plotly==6.5.2
+folium==0.20.0
+tqdm==4.67.1

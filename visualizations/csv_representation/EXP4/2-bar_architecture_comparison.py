@@ -5,8 +5,8 @@ import os
 import re
 
 # --- Configuration ---
-INPUT_FILE = "results/evaluations/04experiment1_compknn_TSP20_neighbors.csv"
-OUTPUT_FILE = "visualizations/csv_eval/TSP20_EXP4/eval_bar2_TSP20_10.png"
+INPUT_FILE = "results/evaluations/04experiment1_compknn_TSP20_neighbors_DUALCHANGE.csv"
+OUTPUT_FILE = "visualizations/csv_eval/TSP20_EXP4/eval_bar2_TSP20_10_TODO_DUAL.png"
 
 # Selection Variable: Choose from ['greedy', 10, 100, 1280]
 # Set to 'greedy' for Greedy decoding, or an integer for Beam Search width.

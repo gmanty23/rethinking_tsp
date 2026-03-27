@@ -5,7 +5,7 @@ import pickle
 import time
 import pprint as pp
 
-def generate_windy_instance(num_nodes, alpha=1.0, max_wind=0.5):
+def generate_windy_instance(num_nodes, alpha=3.0, max_wind=1.0):
     """
     Generates a single Windy TSP instance using an Exponential Cost formulation.
     
@@ -93,8 +93,8 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=1234)
     
     # Windy TSP specific args
-    parser.add_argument("--alpha", type=float, default=2.0, help="Wind influence coefficient")
-    parser.add_argument("--max_wind", type=float, default=0.5, help="Maximum wind magnitude")
+    parser.add_argument("--alpha", type=float, default=3.0, help="Wind influence coefficient")
+    parser.add_argument("--max_wind", type=float, default=1.0, help="Maximum wind magnitude")
     
     opts = parser.parse_args()
     

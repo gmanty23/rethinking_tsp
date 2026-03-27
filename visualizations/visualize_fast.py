@@ -7,7 +7,7 @@ import numpy as np
 import random
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-from matplotlib.colors import LogNorm
+from matplotlib.colors import Normalize
 import subprocess
 import uuid
 import argparse
@@ -64,6 +64,12 @@ def load_windy_model(folder_path):
         n_encode_layers=args['n_encode_layers'],
         aggregation=args.get('aggregation', 'max'),
         normalization=args.get('normalization', 'layer'),
+        
+        # --- ADD THESE NEW LINES ---
+        learn_norm=args.get('learn_norm', True),
+        track_norm=args.get('track_norm', True),
+        # ---------------------------
+        
         node_feature_type=args.get('node_feature_type', 'coords'),
         gnn_direction_mode=args.get('gnn_direction_mode', 'forward')
     )
@@ -137,42 +143,55 @@ def solve_lkh(cost_matrix):
             
     return np.array(tour) if tour else np.arange(num_nodes)
 
+from matplotlib.colors import Normalize
+
+from matplotlib.colors import Normalize
+
 def draw_tour(ax, loc, tour, cost_matrix, wind_vector, title, cost, alpha_wind=3.0):
     """
-    Draws the nodes, global wind vector, and heatmap-colored directed edges.
-    Green edges = Tailwind (High Efficiency). Red edges = Headwind (Low Efficiency).
+    Draws the nodes, global wind vector (centered, bright arrow), and heatmap-colored edges.
+    Green edges = Tailwind. Red edges = Headwind.
     """
     ax.set_title(title, fontsize=14, fontweight='bold', pad=15)
     
-    # Scatter plot for cities/nodes
+    # Scatter plot for cities/nodes (on top)
     ax.scatter(loc[:, 0], loc[:, 1], c='black', s=50, zorder=5)
     
-    # Plot global wind direction in the top right corner
-    ax.quiver(0.85, 0.95, wind_vector[0], wind_vector[1], 
-              color='blue', scale=5, width=0.015, transform=ax.transAxes, zorder=10)
-    ax.text(0.85, 0.88, "Wind", color='blue', transform=ax.transAxes, fontweight='bold')
+    # Normalize wind vector for consistent plotting length
+    wind_norm = np.linalg.norm(wind_vector)
+    w_hat = wind_vector / (wind_norm + 1e-9)
     
-    # Set up colormap. We use LogNorm because the efficiency factor E_ij = exp(-alpha * (u_ij * w))
-    # is exponential. LogNorm maps the exponential scale back to a linear color gradient.
-    norm = LogNorm(vmin=np.exp(-alpha_wind), vmax=np.exp(alpha_wind))
-    cmap = plt.get_cmap('RdYlGn_r') # Green=Efficient, Red=Inefficient
+    # --- CENTERED WIND REPRESENTATION ---
+    # Decreased scale makes the arrow longer. Increased alpha and vibrant color make it brighter.
+    # pivot='mid' ensures the center of the arrow is exactly at (0.5, 0.5).
+    ax.quiver(0.5, 0.5, w_hat[0], w_hat[1], 
+              color='deepskyblue', scale=1.5, width=0.035, 
+              transform=ax.transAxes, zorder=1, alpha=0.45, pivot='mid')
+    
+    # --- BRIGHTER RED-TO-GREEN COLORMAP ---
+    norm = Normalize(vmin=-1.0, vmax=1.0)
+    cmap = plt.get_cmap('RdYlGn') # Red (-1) to Green (+1)
     
     for i in range(len(tour)):
         u = tour[i]
         v = tour[(i + 1) % len(tour)]
         
-        # Calculate edge efficiency
-        edge_cost = cost_matrix[u, v]
-        edge_dist = np.linalg.norm(loc[u] - loc[v])
-        efficiency_factor = edge_cost / (edge_dist + 1e-9)
+        # Calculate geometric direction vector of the chosen edge
+        dir_vec = loc[v] - loc[u]
+        dist = np.linalg.norm(dir_vec)
+        u_ij = dir_vec / (dist + 1e-9)
         
-        # Map efficiency to a color
-        color = cmap(norm(efficiency_factor))
+        # Calculate alignment with wind (Range: -1.0 to 1.0)
+        alignment = np.dot(u_ij, w_hat)
         
-        # Draw directed edge using an arrow
+        # Map alignment directly to vibrant color
+        color = cmap(norm(alignment))
+        
+        # Draw directed edge
         ax.annotate("", xy=loc[v], xytext=loc[u],
                     arrowprops=dict(arrowstyle="->", color=color, lw=2.5, 
-                                    shrinkA=5, shrinkB=5, connectionstyle="arc3,rad=0.1"))
+                                    shrinkA=5, shrinkB=5, connectionstyle="arc3,rad=0.1"),
+                    zorder=4)
     
     ax.set_xlabel(f"Tour Length: {cost:.4f}", fontsize=12, fontweight='bold')
     ax.set_xticks([])
@@ -190,10 +209,12 @@ def main(model_folder, seed):
     model, args = load_windy_model(model_folder)
     model.to(device)
     
+
     # 3. Generate a Test Graph
     # We use the problem's dataset generator to create exactly one graph
     dataset = model.problem.make_dataset(
         num_samples=1, 
+        batch_size=1, # <--- ADD THIS LINE
         min_size=args.get('min_size', 20), 
         max_size=args.get('max_size', 20), 
         neighbors=args.get('neighbors', 0.2), 
@@ -251,10 +272,19 @@ def main(model_folder, seed):
     plt.tight_layout()
     plt.show()
 
+    # Save in an image
+    out_img = f"visualizations/solution_visualization/windy_tsp_comparison_seed{seed}.png"
+    fig.savefig(out_img, dpi=300)
+    print(f"[*] Visualization saved to '{out_img}'")
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Visualize Windy TSP Inference with Reproducibility")
-    parser.add_argument("folder", help="Path to the model directory (must contain args.json and epoch-99.pt)")
-    parser.add_argument("--seed", type=int, default=1234, help="Random seed for deterministic graph generation")
-    parsed = parser.parse_args()
+    # parser = argparse.ArgumentParser(description="Visualize Windy TSP Inference with Reproducibility")
+    # parser.add_argument("folder", help="Path to the model directory (must contain args.json and epoch-99.pt)")
+    # parser.add_argument("--seed", type=int, default=1234, help="Random seed for deterministic graph generation")
+    # parsed = parser.parse_args()
     
-    main(parsed.folder, parsed.seed)
+    # main(parsed.folder, parsed.seed)
+    # FOLDER = "outputs/windy_tsp_20-20/003_exp1_new_stats/06ConfNewStats_ent0.1_exp1/stats_learned_ent0.1_20251227T132122"
+    FOLDER = "outputs/knn_neighbors/tsp20_backward_hybrid_ent0.05_percentage_n0.15_20260304T153537"
+    SEED = 1234
+    main(FOLDER, SEED)
