@@ -47,8 +47,8 @@ def procesar_archivo(input_path, output_path):
 
 # --- Configuración ---
 # Cambia 'entrada.csv' por la ruta de tu archivo
-archivo_entrada = 'results/experiment6_neighbors_coords_learned_sparse.csv'
-archivo_salida = 'results/evaluations/experiment6_neighbors_coords_learned_sparse_processed.csv'
+archivo_entrada = 'results/PAPER_TSP50.csv'
+archivo_salida = 'results/evaluations/PAPER_TSP50_processed.csv'
 
 if __name__ == "__main__":
     procesar_archivo(archivo_entrada, archivo_salida)

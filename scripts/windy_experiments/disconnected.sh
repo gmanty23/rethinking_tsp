@@ -4,14 +4,13 @@
 # HARDWARE & CONFIGURATION
 # ==================================================
 BATCH_SIZE=512
-NUM_WORKERS=4
+NUM_WORKERS=3
 MAX_PARALLEL_JOBS=6
 
 # --- FIXED EXPERIMENT SETTINGS ---
 EPOCHS=100
 PROBLEM="windy_tsp"
-ENTROPY=0.05
-NEIGHBOR=0.05
+NEIGHBOR=0.2
 
 # Standardized Sizes (Multiples of 128)
 VAL_SIZE=2048      # 16 * 128
@@ -23,10 +22,11 @@ GRAPH_SIZES=(20)
 FIXED_FEATS=("coords" "learned")
 KNN_STRATS=("percentage" "random_percentage")
 MODES=("forward" "backward" "dual")
+ENTRPY=(0.01 0.1 0.05 0.5)
 
 # --- PATHS ---
 LOG_DIR="logs_windy_tsp_knn_neighbor_study"
-OUTPUT_DIR="outputs/knn_neighbors" # Standard base output directory for Rethinking TSP
+OUTPUT_DIR="outputs/windy_tsp_20-20" 
 mkdir -p $LOG_DIR
 mkdir -p data/windy_tsp
 mkdir -p results/lkh_windy
@@ -96,50 +96,51 @@ for GRAPH_SIZE in "${GRAPH_SIZES[@]}"; do
     for STRAT in "${KNN_STRATS[@]}"; do
         for FIXED_FEAT in "${FIXED_FEATS[@]}"; do
             for MODE in "${MODES[@]}"; do
+                for ENTROPY in "${ENTRPY[@]}"; do
                 
-                RUN_NAME="tsp${GRAPH_SIZE}_${MODE}_${FIXED_FEAT}_ent${ENTROPY}_${STRAT}_n${NEIGHBOR}"
-                RUN_LOG="${LOG_DIR}/${RUN_NAME}.log"
-                
-                # 1. SKIP CHECK: Does a folder with this configuration already exist?
-                EXISTING_DIR=$(find "$OUTPUT_DIR" -type d -name "${RUN_NAME}_*" | head -n 1)
-                
-                if [ -n "$EXISTING_DIR" ]; then
-                    echo "    [Skip] Folder already exists for: $RUN_NAME" | tee -a "$LOG_FILE"
-                    continue
-                fi
-                
-                # 2. CONCURRENCY CONTROL: Wait if we have reached MAX_PARALLEL_JOBS
-                while [ $(jobs -r -p | wc -l) -ge $MAX_PARALLEL_JOBS ]; do
-                    sleep 5
-                done
-                
-                echo " -> Launching: Size=${GRAPH_SIZE} | Feat=${FIXED_FEAT} | Strat=${STRAT} | Mode=${MODE}" | tee -a "$LOG_FILE"
-
-                # 3. LAUNCH TRAINING IN BACKGROUND
-                python -u run.py \
-                    --problem $PROBLEM \
-                    --min_size $GRAPH_SIZE \
-                    --max_size $GRAPH_SIZE \
-                    --n_epochs $EPOCHS \
-                    --batch_size $BATCH_SIZE \
-                    --epoch_size $EPOCH_SIZE \
-                    --val_datasets $VAL_DATA \
-                    --val_size $VAL_SIZE \
-                    --rollout_size $ROLLOUT_SIZE \
-                    --model attention \
-                    --encoder gnn \
-                    --gated \
-                    --normalization layer \
-                    --num_workers $NUM_WORKERS \
-                    --no_progress_bar \
-                    --entropy_coeff $ENTROPY \
-                    --node_feature_type $FIXED_FEAT \
-                    --gnn_direction_mode $MODE \
-                    --neighbors $NEIGHBOR \
-                    --knn_strat $STRAT \
-                    --run_name "$RUN_NAME" \
-                    > "$RUN_LOG" 2>&1 &
+                    RUN_NAME="tsp${GRAPH_SIZE}_${MODE}_${FIXED_FEAT}_ent${ENTROPY}_${STRAT}_n${NEIGHBOR}"
+                    RUN_LOG="${LOG_DIR}/${RUN_NAME}.log"
                     
+                    # 1. SKIP CHECK: Does a folder with this configuration already exist?
+                    EXISTING_DIR=$(find "$OUTPUT_DIR" -type d -name "${RUN_NAME}_*" | head -n 1)
+                    
+                    if [ -n "$EXISTING_DIR" ]; then
+                        echo "    [Skip] Folder already exists for: $RUN_NAME" | tee -a "$LOG_FILE"
+                        continue
+                    fi
+                    
+                    # 2. CONCURRENCY CONTROL: Wait if we have reached MAX_PARALLEL_JOBS
+                    while [ $(jobs -r -p | wc -l) -ge $MAX_PARALLEL_JOBS ]; do
+                        sleep 5
+                    done
+                    
+                    echo " -> Launching: Size=${GRAPH_SIZE} | Feat=${FIXED_FEAT} | Strat=${STRAT} | Mode=${MODE} | Entropy=${ENTROPY}" | tee -a "$LOG_FILE"
+
+                    # 3. LAUNCH TRAINING IN BACKGROUND
+                    python -u run.py \
+                        --problem $PROBLEM \
+                        --min_size $GRAPH_SIZE \
+                        --max_size $GRAPH_SIZE \
+                        --n_epochs $EPOCHS \
+                        --batch_size $BATCH_SIZE \
+                        --epoch_size $EPOCH_SIZE \
+                        --val_datasets $VAL_DATA \
+                        --val_size $VAL_SIZE \
+                        --rollout_size $ROLLOUT_SIZE \
+                        --model attention \
+                        --encoder gnn \
+                        --gated \
+                        --normalization layer \
+                        --num_workers $NUM_WORKERS \
+                        --no_progress_bar \
+                        --entropy_coeff $ENTROPY \
+                        --node_feature_type $FIXED_FEAT \
+                        --gnn_direction_mode $MODE \
+                        --neighbors $NEIGHBOR \
+                        --knn_strat $STRAT \
+                        --run_name "$RUN_NAME" \
+                        > "$RUN_LOG" 2>&1 &
+                done        
             done
         done
     done

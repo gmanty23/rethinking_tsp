@@ -248,8 +248,8 @@ if __name__ == "__main__":
     IMP_MODEL = "outputs/windy_tsp_20-20/008_exp3_graph_sparsification/13Random_Sparsification/tsp20_dual_hybrid_ent0.05_random20_20260302T160327/epoch-99.pt"
     DATASET = "data/windy_tsp/windy_tsp20_val.pkl"
     LKH_BASELINE = "results/windy_tsp20_val/windy_tsp20_valn1280-lkh_windy.pkl"
-    INDEX = None
-    SEED = 1513
+    INDEX = 379
+    SEED = None
 
     compare_models_to_lkh(ORIG_MODEL, IMP_MODEL, DATASET, LKH_BASELINE, SEED, INDEX)
 

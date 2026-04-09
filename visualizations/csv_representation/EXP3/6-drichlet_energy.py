@@ -6,8 +6,8 @@ import matplotlib.patches as mpatches
 import matplotlib.lines as mlines
 
 # --- CONFIGURATION ---
-INPUT_FILE = "results/evaluations/03experiment1_compknn_TSP20.csv"
-OUTPUT_FILE = "visualizations/csv_eval/TSP20_EXP3/eval_dirichlet_energy_TSP20_CONNECTIONS.png"
+INPUT_FILE = "results/evaluations/07PAPER.csv"
+OUTPUT_FILE = "visualizations/csv_eval/TSP20_EXP7/eval_dirichlet_energy_TSP20_CONNECTIONS.png"
 
 # --- DATA PROCESSING ---
 def process_data(csv_path):
@@ -32,7 +32,7 @@ def process_data(csv_path):
             msg_passing = "Unknown"
         
         dims = row.get('Feature_Dims', 0)
-        arch_group = f"{ftype} ({dims}d) {connection}"
+        arch_group = f"{ftype} {connection}"
         
         return exp_name, ftype, arch_group, msg_passing
 
@@ -130,8 +130,8 @@ def plot_dirichlet_energy(df, hue_order, palette):
     )
     
     plt.title("Topological Over-Smoothing vs. Competence\n(Impact of Dirichlet Energy on Optimality Gap)", fontsize=16, fontweight='bold')
-    plt.ylabel("Optimality Gap MoR (%) (Lower is Better)", fontsize=14, fontweight='bold')
-    plt.xlabel("Average Dirichlet Energy (Higher = Less Local Over-Smoothing)", fontsize=14, fontweight='bold')
+    plt.ylabel("Optimality Gap MoR (%) ", fontsize=14, fontweight='bold')
+    plt.xlabel("Average Dirichlet Energy", fontsize=14, fontweight='bold')
     
     ax.get_legend().remove()
     

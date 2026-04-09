@@ -5,8 +5,8 @@ import numpy as np
 import matplotlib.patches as mpatches
 
 # --- 1. CONFIGURATION ---
-INPUT_FILE = "results/evaluations/03experiment1_compknn_TSP20_sparse.csv"
-OUTPUT_FILE = "visualizations/csv_eval/TSP20_EXP3/eval_bar_TSP20_CONNECTIONS_SPARSE.png"
+INPUT_FILE = "results/evaluations/07PAPER_TSP50.csv"
+OUTPUT_FILE = "visualizations/csv_eval/TSP20_EXP7/eval_bar_TSP50_CONNECTIONS_SPARSE.png"
 
 
 # --- 2. DATA PROCESSING ---
@@ -45,7 +45,7 @@ def process_data(csv_path):
             
         # New Arch Grouping: Feature_Type + Dims + Connection
         dims = row.get('Feature_Dims', 0)
-        arch_group = f"{feature_type} ({dims}d) {connection}"
+        arch_group = f"{feature_type} {connection}"
         
         return arch_group, msg_passing
 
@@ -180,8 +180,8 @@ def plot_robustness_bar(df):
         patch.set_linewidth(0.5)
 
     # --- AXES & LABELS ---
-    plt.title("TSP20\n(Windy TSP Optimality Gap vs. LKH Speedup)", fontsize=16, fontweight='bold')
-    plt.ylabel("Optimality Gap MoR (%)", fontsize=14, fontweight='bold')
+    plt.title("TSP50\n(Windy TSP Optimality Gap vs. LKH Speedup)", fontsize=16, fontweight='bold')
+    plt.ylabel("Optimality Gap (%)", fontsize=14, fontweight='bold')
     plt.xlabel("Decoding Strategy & Speedup Factor", fontsize=14, fontweight='bold')
     
     # Remove default combined legend

@@ -6,8 +6,8 @@ import matplotlib.patches as mpatches
 import matplotlib.lines as mlines
 
 # --- CONFIGURATION ---
-INPUT_FILE = "results/evaluations/03experiment1_compknn_TSP20.csv"
-OUTPUT_FILE = "visualizations/csv_eval/TSP20_EXP3/eval_embedding_variance_TSP20_CONNECTIONS.png"
+INPUT_FILE = "results/evaluations/07PAPER.csv"
+OUTPUT_FILE = "visualizations/csv_eval/TSP20_EXP7/eval_embedding_variance_TSP20_CONNECTIONS.png"
 
 # --- DATA PROCESSING ---
 def process_data(csv_path):
