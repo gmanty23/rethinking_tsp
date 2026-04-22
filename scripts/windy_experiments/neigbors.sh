@@ -3,9 +3,9 @@
 # ==================================================
 # HARDWARE & CONFIGURATION
 # ==================================================
-BATCH_SIZE=256
+BATCH_SIZE=512
 NUM_WORKERS=4
-MAX_PARALLEL_JOBS=3
+MAX_PARALLEL_JOBS=6
 
 # --- FIXED EXPERIMENT SETTINGS ---
 EPOCHS=100

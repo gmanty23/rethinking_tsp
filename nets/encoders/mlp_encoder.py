@@ -61,15 +61,31 @@ class MLPEncoder(nn.Module):
             MLPLayer(hidden_dim, norm, learn_norm, track_norm) for _ in range(n_layers)
         )
 
-    def forward(self, x, graph=None):
+    def forward(self, x, graph=None, cost_matrix=None, **kwargs):
         """
         Args:
-            input: Input node features (B x V x H)
+            x: Input node features (B x V x H)
+            graph: Ignored in MLP
+            cost_matrix: Ignored in MLP, accepted for compatibility
         Returns:
             Updated node features (B x V x H)
         """
         for layer in self.layers:
             x = layer(x)
 
+        return x
+    
+
+
+class IdentityEncoder(nn.Module):
+    """
+    Dummy encoder that skips deep processing entirely.
+    Passes the linearly projected inputs straight to the decoder.
+    """
+    def __init__(self, *args, **kwargs):
+        super(IdentityEncoder, self).__init__()
+
+    def forward(self, x, graph=None, cost_matrix=None, **kwargs):
+        # Simply return the input node embeddings (x) without any transformation
         return x
 

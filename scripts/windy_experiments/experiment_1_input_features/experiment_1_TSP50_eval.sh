@@ -2,11 +2,11 @@
 
 # Define Paths
 VAL_DATA="data/windy_tsp/windy_tsp50_val.pkl"
-OUT_CSV="results/PAPER_TSP50.csv"
-LOG_FILE="results/eval_run_log_TSP50.txt" 
+OUT_CSV="results/gnn_disconnected_none_50.csv"
+LOG_FILE="results/gnn_disconnected_none_50.txt" 
 
 # Collect all epoch-99 models
-MODELS=$(ls outputs/windy_tsp_50-50/TSP_50_PAPER/*/*/epoch-99.pt)
+MODELS=$(ls outputs/none_ablation_50/*/epoch-49.pt)
 
 echo "Starting Evaluation..." | tee -a "$LOG_FILE"
 echo "Models found: $(echo "$MODELS" | wc -l)" | tee -a "$LOG_FILE"

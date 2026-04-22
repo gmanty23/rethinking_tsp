@@ -2,11 +2,11 @@
 
 # Define Paths
 VAL_DATA="data/windy_tsp/windy_tsp20_val.pkl"
-OUT_CSV="results/experiment6_neighbors_coords_learned_sparse.csv"
-LOG_FILE="results/eval_run_log_TSP20_coords_learned_sparse.txt"  
+OUT_CSV="results/gnn_disconnected_none.csv"
+LOG_FILE="results/gnn_disconnected_none.txt"  
 
 # Collect all epoch-99 models
-MODELS=$(ls outputs/windy_tsp_20-20/coords_learned_sparse/*/epoch-99.pt)
+MODELS=$(ls outputs/none_ablation_20/*/epoch-49.pt)
 
 echo "Starting Evaluation..." | tee -a "$LOG_FILE"
 echo "Models found: $(echo "$MODELS" | wc -l)" | tee -a "$LOG_FILE"
