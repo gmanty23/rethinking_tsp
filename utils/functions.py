@@ -93,7 +93,7 @@ def load_model(path, epoch=None, extra_logging=False):
     from nets.nar_model import NARModel
     from nets.encoders.gat_encoder import GraphAttentionEncoder
     from nets.encoders.gnn_encoder import GNNEncoder
-    from nets.encoders.mlp_encoder import MLPEncoder
+    from nets.encoders.mlp_encoder import MLPEncoder, IdentityEncoder
     
     if os.path.isfile(path):
         model_filename = path
@@ -121,7 +121,8 @@ def load_model(path, epoch=None, extra_logging=False):
     encoder_class = {
         'gnn': GNNEncoder,
         'gat': GraphAttentionEncoder,
-        'mlp': MLPEncoder
+        'mlp': MLPEncoder,
+        'none': IdentityEncoder
     }.get(args.get('encoder', 'gnn'), None)
     assert encoder_class is not None, "Unknown encoder: {}".format(encoder_class)
     

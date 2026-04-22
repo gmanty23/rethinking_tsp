@@ -9,6 +9,7 @@ import torch
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter as TbLogger
 
+
 from options import get_options
 from train import train_epoch, train_epoch_sl, validate, get_inner_model
 
@@ -17,7 +18,7 @@ from nets.nar_model import NARModel
 from nets.critic_network import CriticNetwork
 from nets.encoders.gat_encoder import GraphAttentionEncoder
 from nets.encoders.gnn_encoder import GNNEncoder
-from nets.encoders.mlp_encoder import MLPEncoder
+from nets.encoders.mlp_encoder import MLPEncoder, IdentityEncoder
 
 from reinforce_baselines import NoBaseline, ExponentialBaseline, CriticBaseline, RolloutBaseline, WarmupBaseline
 
@@ -80,7 +81,8 @@ def _run_rl(opts):
     encoder_class = {
         'gnn': GNNEncoder,
         'gat': GraphAttentionEncoder,
-        'mlp': MLPEncoder
+        'mlp': MLPEncoder,
+        'none': IdentityEncoder
     }.get(opts.encoder, None)
     assert encoder_class is not None, "Unknown encoder: {}".format(encoder_class)
     model = model_class(

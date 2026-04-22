@@ -5,8 +5,8 @@ import numpy as np
 import matplotlib.patches as mpatches
 
 # --- 1. CONFIGURATION ---
-INPUT_FILE = "results/evaluations/07PAPER_TSP50.csv"
-OUTPUT_FILE = "visualizations/csv_eval/TSP20_EXP7/eval_bar_TSP50_CONNECTIONS_SPARSE.png"
+INPUT_FILE = "results/evaluations/08gnn_disconnected_no.csv"
+OUTPUT_FILE = "visualizations/csv_eval/MLPEXP/eval_bar_TSP20_none.png"
 
 
 # --- 2. DATA PROCESSING ---
@@ -180,7 +180,7 @@ def plot_robustness_bar(df):
         patch.set_linewidth(0.5)
 
     # --- AXES & LABELS ---
-    plt.title("TSP50\n(Windy TSP Optimality Gap vs. LKH Speedup)", fontsize=16, fontweight='bold')
+    plt.title("TSP20\n(Windy TSP Optimality Gap vs. LKH Speedup)", fontsize=16, fontweight='bold')
     plt.ylabel("Optimality Gap (%)", fontsize=14, fontweight='bold')
     plt.xlabel("Decoding Strategy & Speedup Factor", fontsize=14, fontweight='bold')
     
