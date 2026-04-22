@@ -1,0 +1,22 @@
+# Ignore version control
+.git
+.gitignore
+
+# Ignore Python cache
+__pycache__
+*.pyc
+*.pyo
+
+# Ignore local virtual environments (CRITICAL for your 134GB issue)
+miniconda3/
+venv/
+env/
+.env/
+
+# Ignore outputs, logs, and massive datasets (we will mount these later)
+outputs/
+logs/
+results/
+data/
+*.pt
+*.pth
