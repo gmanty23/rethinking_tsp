@@ -46,6 +46,4 @@ CMD ["/bin/bash"]
 
 
 
-# docker run --gpus all -it --rm --ipc=host \
-#     -v $(pwd):/workspace \
-#     windy-tsp-modern:latest bash
+# docker run --user $(id -u):$(id -g) --gpus all -it --rm --ipc=host -v $(pwd):/workspace windy-tsp-modern:latest bash
