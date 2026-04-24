@@ -38,6 +38,7 @@ RUN conda env create -f environment.yml
 SHELL ["conda", "run", "-n", "tsp_modern", "/bin/bash", "-c"]
 
 # Copy the rest of the project codebase
+# COPY . .
 #COPY . .
 
 # Set the entrypoint to automatically activate the environment when you run the container
