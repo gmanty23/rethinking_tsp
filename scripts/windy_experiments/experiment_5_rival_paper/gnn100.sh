@@ -4,13 +4,14 @@
 # HARDWARE & CONFIGURATION
 # ==================================================
 BATCH_SIZE=128        # Lowered to 128 to prevent OOM on N=100 GNNs
-NUM_WORKERS=4
-MAX_PARALLEL_JOBS=1   # Running sequentially for safety
+NUM_WORKERS=18
+MAX_PARALLEL_JOBS=2   # Running sequentially for safety
 
 # --- FIXED EXPERIMENT SETTINGS ---
-EPOCHS=50             
+EPOCHS=49             
 PROBLEM="windy_tsp" 
 ENTROPY=0.05
+N_LAYERS=1
 
 # Standardized Sizes
 VAL_SIZE=2048      
@@ -19,12 +20,12 @@ ROLLOUT_SIZE=10240
 
 # --- VARIABLES TO TEST ---
 GRAPH_SIZES=(100)
-FEATURES=("hybrid" "learned" "coords")
+FEATURES=("hybrid")  #meter luego coords y learned
 
 # New GNN-Specific Variables
-KNN_STRATS=("percentage" "random_percentage") 
+KNN_STRATS=("cost_weighted_percentage" "percentage" "random_percentage") 
 NEIGHBORS=(0.05 0.2)
-MODES=("forward")
+MODES=("forward" "backward" "dual")
 
 # --- PATHS ---
 LOG_DIR="logs_windy_tsp_gnn100_ablation"
@@ -35,7 +36,7 @@ mkdir -p results/lkh_windy
 mkdir -p $OUTPUT_DIR
 
 # Master Log File
-LOG_FILE="${LOG_DIR}/tsp_gnn100_ablation_study.log"
+LOG_FILE="${LOG_DIR}/upgrade_ablation_tsp_gnn100.log"
 
 # Initialize Log
 echo "==================================================" > "$LOG_FILE"
@@ -76,6 +77,7 @@ for GRAPH_SIZE in "${GRAPH_SIZES[@]}"; do
             --seed 1234 >> "$LOG_FILE" 2>&1
     else
         echo ">>> Validation data exists for N=$GRAPH_SIZE." | tee -a "$LOG_FILE" 
+    fi
 
     # 2. PRE-COMPUTE LKH BASELINE
     LKH_TARGET="results/lkh_windy/$(basename $VAL_DATA .pkl).pkl"
@@ -105,7 +107,7 @@ for GRAPH_SIZE in "${GRAPH_SIZES[@]}"; do
             for MODE in "${MODES[@]}"; do 
                 for NEIGHBOR in "${NEIGHBORS[@]}"; do
                 
-                    RUN_NAME="gnn100_tsp${GRAPH_SIZE}_${MODE}_${FEAT}_ent${ENTROPY}_${STRAT}_n${NEIGHBOR}"
+                    RUN_NAME="upgrade_ablation_gnn100_tsp${GRAPH_SIZE}_${MODE}_${FEAT}_ent${ENTROPY}_${STRAT}_n${NEIGHBOR}"
                     RUN_LOG="${LOG_DIR}/${RUN_NAME}.log"
                     
                     # 1. SKIP CHECK: Does a folder with this configuration already exist? 
@@ -131,17 +133,18 @@ for GRAPH_SIZE in "${GRAPH_SIZES[@]}"; do
                         --n_epochs $EPOCHS \
                         --batch_size $BATCH_SIZE \
                         --epoch_size $EPOCH_SIZE \
-                        --val_datasets $VAL_DATA \ 
+                        --val_datasets $VAL_DATA \
                         --val_size $VAL_SIZE \
                         --rollout_size $ROLLOUT_SIZE \
                         --model attention \
                         --encoder gnn \
+                        --n_encode_layers $N_LAYERS \
                         --gated \
-                        --normalization layer \ 
+                        --normalization layer \
                         --num_workers $NUM_WORKERS \
                         --no_progress_bar \
                         --entropy_coeff $ENTROPY \
-                        --node_feature_type $FEAT \ 
+                        --node_feature_type $FEAT \
                         --gnn_direction_mode $MODE \
                         --neighbors $NEIGHBOR \
                         --knn_strat $STRAT \

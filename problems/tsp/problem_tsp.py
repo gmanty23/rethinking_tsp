@@ -16,24 +16,49 @@ def nearest_neighbor_graph(nodes, neighbors, knn_strat):
     """Returns k-Nearest Neighbor graph as a **NEGATIVE** adjacency matrix
     """
     num_nodes = len(nodes)
-# If `neighbors` is a percentage, convert to int
-    if knn_strat in ['percentage', 'random_percentage']:
-        neighbors = int(num_nodes * neighbors)
     
-    if neighbors >= num_nodes-1 or neighbors == -1:
+    # 1. Determine number of neighbors k
+    if knn_strat in ['percentage', 'random_percentage', 'cost_weighted_percentage']:
+        k = int(num_nodes * neighbors)
+    else:
+        k = int(neighbors)
+        
+    if k >= num_nodes - 1 or k == -1:
         W = np.zeros((num_nodes, num_nodes))
     else:
-        # Compute distance matrix
+        # Compute distance matrix (Euclidean cost for standard TSP)
         W_val = squareform(pdist(nodes, metric='euclidean'))
         W = np.ones((num_nodes, num_nodes))
         
-        # Determine k-nearest neighbors for each node
-        knns = np.argpartition(W_val, kth=neighbors, axis=-1)[:, neighbors::-1]
-        # Make connections
-        for idx in range(num_nodes):
-            W[idx][knns[idx]] = 0
-    
-    # Remove self-connections
+        # 2. Connection Selection Logic
+        if knn_strat in ['random', 'random_percentage']:
+            # --- Uniform Random Sparsification ---
+            for i in range(num_nodes):
+                valid_neighbors = np.delete(np.arange(num_nodes), i)
+                rand_indices = np.random.choice(valid_neighbors, size=k, replace=False)
+                W[i, rand_indices] = 0
+                
+        elif knn_strat == 'cost_weighted_percentage':
+            # --- Cost-Proportional Random Sparsification (Distance-based) ---
+            for i in range(num_nodes):
+                valid_neighbors = np.delete(np.arange(num_nodes), i)
+                distances = W_val[i, valid_neighbors]
+                
+                # Inverse distance weighting: shorter distance = higher probability
+                weights = 1.0 / (distances + 1e-8)
+                probs = weights / np.sum(weights)
+                
+                rand_indices = np.random.choice(valid_neighbors, size=k, replace=False, p=probs)
+                W[i, rand_indices] = 0
+                
+        else:
+            # --- BASELINE: Deterministic kNN ---
+            # Sort distances to grab the top 'k' closest (skipping self, which is index 0)
+            knns = np.argsort(W_val, axis=-1)[:, 1:k+1]
+            for idx in range(num_nodes):
+                W[idx][knns[idx]] = 0
+
+    # Remove self-connections (1 = disconnected/masked)
     np.fill_diagonal(W, 1)
     return W
 
@@ -61,12 +86,12 @@ def get_wind_knn_graph(nodes, neighbors, knn_strat, cost_matrix):
     num_nodes = len(nodes)
     
     # 1. Determine number of neighbors k
-    if knn_strat in ['percentage', 'random_percentage']:
+    if knn_strat in ['percentage', 'random_percentage', 'cost_weighted_percentage']:
         k = int(num_nodes * neighbors)
     else:
         k = int(neighbors)
     
-    # Guard clause: If k is too high, return fully connected (all zeros)
+    # 2. Guard clause: If k is too high, return fully connected (all zeros)
     if k >= num_nodes - 1 or k == -1:
         return np.zeros((num_nodes, num_nodes))
         
@@ -78,45 +103,60 @@ def get_wind_knn_graph(nodes, neighbors, knn_strat, cost_matrix):
     if knn_strat in ['random', 'random_percentage']:
         # --- ABLATION: Uniform Random Sparsification ---
         for i in range(num_nodes):
-            # Get all node indices except the current node 'i'
             valid_neighbors = np.delete(np.arange(num_nodes), i)
-            # Randomly select 'k' neighbors without replacement
             rand_indices = np.random.choice(valid_neighbors, size=k, replace=False)
             W[i, rand_indices] = 0 # 0 = edge exists
+
+    elif knn_strat == 'cost_weighted_percentage':
+        # --- NEW: Cost-Proportional Random Sparsification ---
+        for i in range(num_nodes):
+            valid_neighbors = np.delete(np.arange(num_nodes), i)
+            
+            # Extract costs to valid neighbors
+            costs_to_neighbors = cost_matrix[i, valid_neighbors]
+            
+            # Inverse cost weighting: lower cost = higher weight
+            # Add epsilon to prevent division by zero
+            weights = 1.0 / (costs_to_neighbors + 1e-8) 
+            
+            # Normalize to create a probability distribution that sums to 1
+            probs = weights / np.sum(weights)
+            
+            # Sample 'k' neighbors without replacement based on their cost probabilities
+            rand_indices = np.random.choice(valid_neighbors, size=k, replace=False, p=probs)
+            W[i, rand_indices] = 0
+
     else:
         # --- BASELINE: Cost-aware kNN ---
-        # Calculate Nearest Neighbors based on COST
         knn_indices = np.argsort(cost_matrix, axis=1)[:, 1:k+1]
         for i in range(num_nodes):
-            W[i, knn_indices[i]] = 0 # 0 = edge exists
+            W[i, knn_indices[i]] = 0 
             
     # --- ENFORCE MINIMUM IN-DEGREE ---
-    # Decide how many edges to reconstruct (10% of k, with a hard minimum of 1)
     min_in_edges = max(1, int(0.1 * k)) 
-
-    # Summing zeros along columns gives the in-degree of each node
     in_degrees = np.sum(W == 0, axis=0)
-    
-    # Identify nodes that are completely isolated
     isolated_nodes = np.where(in_degrees == 0)[0] 
     
     for j in isolated_nodes:
+        valid_origins = np.delete(np.arange(num_nodes), j)
+
         if knn_strat in ['random', 'random_percentage']:
             # --- Random Reconnection ---
-            # Get all nodes except the target 'j'
-            valid_origins = np.delete(np.arange(num_nodes), j)
-            
-            # Randomly select origins to fulfill the minimum in-degree
             best_origins = np.random.choice(valid_origins, size=min_in_edges, replace=False)
+
+        elif knn_strat == 'cost_weighted_percentage':
+            # --- Cost-Proportional Reconnection ---
+            costs_from_origins = cost_matrix[valid_origins, j]
+            
+            weights = 1.0 / (costs_from_origins + 1e-8)
+            probs = weights / np.sum(weights)
+            
+            best_origins = np.random.choice(valid_origins, size=min_in_edges, replace=False, p=probs)
+
         else:
             # --- Cost-Aware Reconnection ---
-            # Extract costs to travel TO node j from all other nodes i
             costs_to_j = cost_matrix[:, j].copy()
-            
-            # Mask the self-loop
             costs_to_j[j] = np.inf 
-            
-            # Find the optimal origin nodes 'i' to reach 'j'
             best_origins = np.argsort(costs_to_j)[:min_in_edges]
             
         # Forcibly open the edges from the selected origins to j

@@ -1,3 +1,4 @@
+from email import parser
 import os
 import time
 import argparse
@@ -40,7 +41,7 @@ def get_options(args=None):
     # Model/GNN Encoder
     parser.add_argument('--model', default='attention', 
                         help="Model: 'attention'/'nar'")
-    parser.add_argument('--encoder', default='gnn', 
+    parser.add_argument('--encoder', default='gnn', choices=['gat', 'gnn', 'mlp', 'aafm'],
                         help="Graph encoder: 'gat'/'gnn'/'mlp'")
     parser.add_argument('--embedding_dim', type=int, default=128, 
                         help='Dimension of input embedding')
@@ -71,6 +72,12 @@ def get_options(args=None):
     parser.add_argument('--gnn_direction_mode', type=str, default='forward', choices=['forward', 'backward', 'dual'],
                         help="Directional aggregation for GNN: 'forward' (standard), 'backward' (outgoing), 'dual' (bi-directional).")
     # -----------------------------------
+
+    # --- RRNCO ABLATION ARGUMENTS ---
+    parser.add_argument('--use_ane', action='store_true', 
+                        help="Enable Adaptive Node Embedding (distance-proportional neighbor sampling and contextual gating).")
+    parser.add_argument('--use_nab', action='store_true', 
+                        help="Enable Neural Adaptive Bias (injects distance, time, and angle matrices into attention/gating).")
 
     # Training
     parser.add_argument('--lr_model', type=float, default=1e-4, 
