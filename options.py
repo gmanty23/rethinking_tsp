@@ -67,17 +67,26 @@ def get_options(args=None):
                         help='Clip the parameters to within +- this value using tanh. Set to 0 to not do clipping.')
     
     # --- NEW ARGUMENTS FOR WINDY TSP ---
+    parser.add_argument('--node_embedding_type', type=str, default='original', 
+                        choices=['original', #(coords+stats)concatenated
+                                 'ane_pure', #(coords+local distances)gated
+                                 'ane_hybrid', #((coords+local distances)gated+global stats)concatenated
+                                 'ane_no_gate', #(coords+local distances+global stats)concatenated
+                                 'ane_3way_gate', # (coords+local distances+global stats) gated
+                                 'ane_stats_only' # (coords+stats)gated
+                                 ],
+                        help="Choose node features: 'original' (Coords+Stats), 'ane_pure' (Coords+Local Distances), or 'ane_hybrid' (Coords+Local Distances+Global Stats).")
     parser.add_argument('--node_feature_type', type=str, default='coords', choices=['coords', 'learned', 'hybrid','blank'],
                         help="Feature type for Windy TSP: 'coords' (x,y), 'learned' (stats), 'hybrid' (both), or 'blank' (learned completely from blank parameter).")
     parser.add_argument('--gnn_direction_mode', type=str, default='forward', choices=['forward', 'backward', 'dual'],
                         help="Directional aggregation for GNN: 'forward' (standard), 'backward' (outgoing), 'dual' (bi-directional).")
-    # -----------------------------------
+    #-----------------------------------
 
-    # --- RRNCO ABLATION ARGUMENTS ---
-    parser.add_argument('--use_ane', action='store_true', 
-                        help="Enable Adaptive Node Embedding (distance-proportional neighbor sampling and contextual gating).")
-    parser.add_argument('--use_nab', action='store_true', 
-                        help="Enable Neural Adaptive Bias (injects distance, time, and angle matrices into attention/gating).")
+    # # --- RRNCO ABLATION ARGUMENTS ---
+    # parser.add_argument('--use_ane', action='store_true', 
+    #                     help="Enable Adaptive Node Embedding (distance-proportional neighbor sampling and contextual gating).")
+    # parser.add_argument('--use_nab', action='store_true', 
+    #                     help="Enable Neural Adaptive Bias (injects distance, time, and angle matrices into attention/gating).")
 
     # Training
     parser.add_argument('--lr_model', type=float, default=1e-4, 

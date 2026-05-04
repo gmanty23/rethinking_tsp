@@ -84,6 +84,21 @@ def _run_rl(opts):
         'mlp': MLPEncoder,
         'none': IdentityEncoder
     }.get(opts.encoder, None)
+
+    if opts.neighbors < 1.0:
+        derived_k = int(opts.max_size * opts.neighbors)
+        # Throw the warning if sizes are variable!
+        if opts.min_size != opts.max_size:
+            print("\n" + "!"*80)
+            print(" ⚠️  WATCH OUT! ")
+            print(f" You are using a percentage (--neighbors {opts.neighbors}) with variable graph sizes!")
+            print(f" (min_size: {opts.min_size}, max_size: {opts.max_size})")
+            print(" This will crash the neural network due to mismatched matrix dimensions.")
+            print(" Please use a fixed graph size (min_size == max_size) or pass a fixed integer to --neighbors!")
+            print("!"*80 + "\n")
+    else:
+        derived_k = int(opts.neighbors)
+
     assert encoder_class is not None, "Unknown encoder: {}".format(encoder_class)
     model = model_class(
         problem=problem,
@@ -104,7 +119,9 @@ def _run_rl(opts):
         checkpoint_encoder=opts.checkpoint_encoder,
         shrink_size=opts.shrink_size,
         node_feature_type=opts.node_feature_type,
-        gnn_direction_mode=opts.gnn_direction_mode
+        gnn_direction_mode=opts.gnn_direction_mode,
+        node_embedding_type=opts.node_embedding_type,
+        k_neighbors=derived_k
     ).to(opts.device)
 
     if opts.use_cuda and torch.cuda.device_count() > 1:

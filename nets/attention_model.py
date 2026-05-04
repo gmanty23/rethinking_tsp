@@ -116,6 +116,10 @@ class AttentionModel(nn.Module):
         self.extra_logging = extra_logging
         self.node_feature_type = node_feature_type
         self.gnn_direction_mode = gnn_direction_mode
+
+        # --- RRNCO Ablation Parameters ---
+        self.node_embedding_type = kwargs.get('node_embedding_type', 'original')
+        self.k_neighbors = kwargs.get('k_neighbors', 20) 
         
         self.decode_type = None
         self.temp = 1.0
@@ -176,7 +180,35 @@ class AttentionModel(nn.Module):
             self.W_placeholder = nn.Parameter(torch.Tensor(2 * embedding_dim))
             self.W_placeholder.data.uniform_(-1, 1)  # Placeholder should be in range of activations
         
-        # === INPUT EMBEDDING LAYER ===
+        # === INPUT EMBEDDING LAYER  (Multi-Modal Feature Fusion)===
+        # --- ANE Branches ---
+        ane_models = ['ane_pure', 'ane_hybrid', 'ane_no_gate', 'ane_3way_gate', 'ane_stats_only']
+        
+        if self.node_embedding_type in ane_models:
+            # Shared Projections (used by almost all ANE variants)
+            self.proj_spatial = nn.Linear(2, embedding_dim)
+            self.proj_topo = nn.Linear(self.k_neighbors, embedding_dim)
+            self.proj_stats = nn.Linear(8, embedding_dim)
+            
+            # Standard 2-Way Gate (used by pure, hybrid, and stats_only)
+            self.context_gate = nn.Sequential(
+                nn.Linear(embedding_dim, embedding_dim),
+                nn.Sigmoid()
+            )
+            
+            # Variant-Specific Layers
+            if self.node_embedding_type == 'ane_hybrid':
+                self.hybrid_mixer = nn.Linear(embedding_dim * 2, embedding_dim)
+                
+            elif self.node_embedding_type == 'ane_no_gate':
+                # Compresses Coords (2) + Topology (k) + Stats (8) all at once
+                self.proj_no_gate = nn.Linear(2 + self.k_neighbors + 8, embedding_dim)
+                
+            elif self.node_embedding_type == 'ane_3way_gate':
+                # Outputs 3 values per hidden dimension so we can apply a Softmax
+                self.context_gate_3way = nn.Linear(embedding_dim, 3 * embedding_dim)
+
+        # --- Baseline ---
         if self.node_feature_type == 'blank':
             # Case D: Blank (Learnable Parameter)
             # We create a single learnable vector instead of a projection layer
@@ -374,6 +406,67 @@ class AttentionModel(nn.Module):
         
         # === TSP / Windy TSP ===
         
+        # 1. CENTRALIZED CONTIGUOUS FIX & SANITIZATION
+        nodes = nodes.contiguous()
+        nodes[torch.isnan(nodes)] = 0.0
+        nodes[torch.isinf(nodes)] = 0.0
+        
+        ane_models = ['ane_pure', 'ane_hybrid', 'ane_no_gate', 'ane_3way_gate', 'ane_stats_only']
+        
+        # --- ANE VARIANTS ---
+        if getattr(self, 'node_embedding_type', 'original') in ane_models:
+            
+            b, n, _ = nodes.size()
+            
+            # Slice the Fat Vector
+            loc_flat = nodes[..., 0:2].view(-1, 2)
+            topo_flat = nodes[..., 13 : 13 + self.k_neighbors].view(-1, self.k_neighbors)
+            stats_flat = nodes[..., 5:13].view(-1, 8)
+            
+            # Model 1: NO GATE (Pure Concatenation)
+            if self.node_embedding_type == 'ane_no_gate':
+                concat_all = torch.cat([loc_flat, topo_flat, stats_flat], dim=-1)
+                emb_no_gate = self.proj_no_gate(concat_all)
+                return emb_no_gate.view(b, n, -1)
+
+            # Pre-compute shared projections for the gated models
+            emb_spatial = self.proj_spatial(loc_flat)
+            emb_topo = self.proj_topo(topo_flat)
+            emb_stats = self.proj_stats(stats_flat)
+
+            # Model 2: 3-WAY GATE (Softmax Competition)
+            if self.node_embedding_type == 'ane_3way_gate':
+                # Generate logits and reshape to (Batch*Nodes, 3 branches, HiddenDim)
+                gate_logits = self.context_gate_3way(emb_spatial).view(-1, 3, self.embedding_dim)
+                
+                # Softmax across the 3 branches (dim=1) so they sum to 1.0
+                gates = F.softmax(gate_logits, dim=1) 
+                
+                g_spatial = gates[:, 0, :]
+                g_topo = gates[:, 1, :]
+                g_stats = gates[:, 2, :]
+                
+                emb_3way = (g_spatial * emb_spatial) + (g_topo * emb_topo) + (g_stats * emb_stats)
+                return emb_3way.view(b, n, -1)
+
+            # Model 3: STATS ONLY (2-Way gate: Coords vs Stats, ignoring Topology)
+            if self.node_embedding_type == 'ane_stats_only':
+                gate = self.context_gate(emb_spatial)
+                emb_stats_only = gate * emb_spatial + (1 - gate) * emb_stats
+                return emb_stats_only.view(b, n, -1)
+
+            # Original ANE (Pure and Hybrid)
+            gate = self.context_gate(emb_spatial)
+            emb_ane = gate * emb_spatial + (1 - gate) * emb_topo
+            
+            if self.node_embedding_type == 'ane_pure':
+                return emb_ane.view(b, n, -1)
+                
+            elif self.node_embedding_type == 'ane_hybrid':
+                h_mixed = self.hybrid_mixer(torch.cat([emb_ane, emb_stats], dim=-1))
+                return h_mixed.view(b, n, -1)
+            
+        # --- Original ---
         # Handle 'blank' mode first
         if self.node_feature_type == 'blank':
             batch_size, num_nodes, _ = nodes.size()
@@ -385,10 +478,10 @@ class AttentionModel(nn.Module):
             features = nodes
         elif self.node_feature_type == 'learned':
             # Take all features from index 5 to the end
-            features = nodes[..., 5:] 
+            features = nodes[..., 5:13] 
         elif self.node_feature_type == 'hybrid':
-            # Concatenate coords (0:2) with all stats (5:end)
-            features = torch.cat((nodes[..., 0:2], nodes[..., 5:]), dim=-1)
+            # Concatenate coords (0:2) with all stats (5:13)
+            features = torch.cat((nodes[..., 0:2], nodes[..., 5:13]), dim=-1)
         else: # coords
             features = nodes[..., 0:2]
 

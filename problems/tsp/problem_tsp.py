@@ -107,8 +107,9 @@ def get_wind_knn_graph(nodes, neighbors, knn_strat, cost_matrix):
             rand_indices = np.random.choice(valid_neighbors, size=k, replace=False)
             W[i, rand_indices] = 0 # 0 = edge exists
 
-    elif knn_strat == 'cost_weighted_percentage':
-        # --- NEW: Cost-Proportional Random Sparsification ---
+    # (AQUÍ): We add 'ane' to your existing cost-weighted logic!
+    elif knn_strat in ['cost_weighted_percentage', 'ane']:
+        # --- ANE / Cost-Proportional Random Sparsification ---
         for i in range(num_nodes):
             valid_neighbors = np.delete(np.arange(num_nodes), i)
             
@@ -144,8 +145,9 @@ def get_wind_knn_graph(nodes, neighbors, knn_strat, cost_matrix):
             # --- Random Reconnection ---
             best_origins = np.random.choice(valid_origins, size=min_in_edges, replace=False)
 
-        elif knn_strat == 'cost_weighted_percentage':
-            # --- Cost-Proportional Reconnection ---
+        # (AQUÍ): We add 'ane' here as well to ensure minimum reachability
+        elif knn_strat in ['cost_weighted_percentage', 'ane']:
+            # --- ANE / Cost-Proportional Reconnection ---
             costs_from_origins = cost_matrix[valid_origins, j]
             
             weights = 1.0 / (costs_from_origins + 1e-8)
@@ -312,31 +314,10 @@ class TSPDataset(Dataset):
                  num_samples=128000, offset=0, distribution=None, neighbors=20, 
                  knn_strat=None, supervised=False, nar=False, 
                  node_feature_type='coords',
-                 problem_type = 'tsp'): # New argument
+                 problem_type='tsp',
+                 node_embedding_type='original'):
         """Class representing a PyTorch dataset of TSP instances, which is fed to a dataloader
             Supports both Standard TSP (.txt) and Windy TSD (.pkl)
-
-        Args:
-            filename: File path to read from (for SL)
-            min_size: Minimum TSP size to generate (for RL)
-            max_size: Maximum TSP size to generate (for RL)
-            batch_size: Batch size for data loading/batching
-            num_samples: Total number of samples in dataset
-            offset: Offset for loading from file
-            distribution: Data distribution for generation (unused)
-            neighbors: Number of neighbors for k-NN graph computation
-            knn_strat: Strategy for computing k-NN graphs ('percentage'/'standard')
-            supervised: Flag to enable supervised learning
-            nar: Flag to indicate Non-autoregressive decoding scheme, which uses edge-level groundtruth
-            node_feature_type: 'coords', 'learned', or 'hybrid'. 
-                               Controls what features are packed for the model.
-            problem_type: 'tsp' or 'windy_tsp'. Indicates the problem variant.
-
-        Notes:
-            `batch_size` is important to fix across dataset and dataloader,
-            as we are dealing with TSP graphs of variable sizes. To enable
-            efficient training without DGL/PyG style sparse graph libraries,
-            we ensure that each batch contains dense graphs of the same size.
         """
         super(TSPDataset, self).__init__()
 
@@ -352,11 +333,13 @@ class TSPDataset(Dataset):
         self.supervised = supervised
         self.nar = nar
         self.node_feature_type = node_feature_type
-        self.problem_type = problem_type # Store it
-        
+        self.problem_type = problem_type 
+                
         # New flags for Windy TSP
         self.is_windy = False
         self.wind_data = None 
+        self.node_embedding_type = node_embedding_type
+
 
         if filename is not None:
             # === Windy TSP Loading (.pkl) ===
@@ -411,7 +394,7 @@ class TSPDataset(Dataset):
             
         assert self.size % batch_size == 0, \
             "Number of samples ({}) must be divisible by batch size ({})".format(self.size, batch_size)
-
+        
     def __len__(self):
         return self.size
 
@@ -425,99 +408,90 @@ class TSPDataset(Dataset):
             
             num_nodes = len(loc)
             
-            # 1. Physics Packing (For Environment/Reward)
+            # 1. Physics Packing (For Environment/Reward downstream)
             wind_repeated = np.tile(wind, (num_nodes, 1))
             alpha_repeated = np.full((num_nodes, 1), alpha)
             
-            # 2. Statistics Calculation (For Model Features)
-            # Calculate diffs
+            # 2. Base Cost Calculation
             diff = loc[None, :, :] - loc[:, None, :] # (N, N, 2)
             dists = np.linalg.norm(diff, axis=-1)
-            # Unit vectors
+            
             with np.errstate(divide='ignore', invalid='ignore'):
                 u = diff / dists[:, :, None]
             u[np.isnan(u)] = 0
             
-            # Wind Projection
             wind_proj = np.dot(u, wind) # (N, N)
-            
-            # Asymmetric Costs
             costs = dists * np.exp(-1.0 * alpha * wind_proj)
             np.fill_diagonal(costs, 0)
-
-            # norm_costs = costs / (costs.max() + 1e-6)
-            norm_costs = costs
-
-            # Extract Stats
-            # Mask diagonal with NaN to ignore self-loops in stats
-            costs_masked = costs.copy()
-            np.fill_diagonal(costs_masked, np.nan)
-
-            # OUTGOING Stats (Axis 1 = Rows)
-            stat_out_mean = np.nanmean(costs_masked, axis=1, keepdims=True)
-            stat_out_std  = np.nanstd(costs_masked, axis=1, keepdims=True)
-            stat_out_min  = np.nanmin(costs_masked, axis=1, keepdims=True)
-            stat_out_max  = np.nanmax(costs_masked, axis=1, keepdims=True)
-
-            # INCOMING Stats (Axis 0 = Cols)
-            stat_in_mean  = np.nanmean(costs_masked, axis=0, keepdims=True).T
-            stat_in_std   = np.nanstd(costs_masked, axis=0, keepdims=True).T
-            stat_in_min   = np.nanmin(costs_masked, axis=0, keepdims=True).T
-            stat_in_max   = np.nanmax(costs_masked, axis=0, keepdims=True).T
-
-            # 3. Super-Packing
-            # Structure: [x, y, w_x, w_y, alpha,  mean_out, mean_in, std_out, std_in, min_out, min_in, max_out, max_in]
-            # Indices:    0  1   2    3      4       5         6        7        8        9        10       11       12
-            nodes_feature = np.concatenate([
-                loc,              # 0-1
-                wind_repeated,    # 2-3
-                alpha_repeated,   # 4
-                stat_out_mean,    # 5
-                stat_in_mean,     # 6
-                stat_out_std,     # 7
-                stat_in_std,      # 8
-                stat_out_min,     # 9
-                stat_in_min,      # 10
-                stat_out_max,     # 11
-                stat_in_max       # 12
-            ], axis=-1)
             
-            # --- Use wind costs for graph generation ---
+            # --- THE FEATURE/REWARD SPLIT ---
+            # 2A. The RL Reward (Pure, unscaled exponential physics)
+            norm_costs = costs.copy() 
+
+            # 2B. The Neural Network Features (Log + Z-Score)
+            # Take log to linearize the exponential explosion
+            costs_log = np.log(costs + 1e-8)
+            costs_masked = costs_log.copy()
+            np.fill_diagonal(costs_masked, np.nan) # Ignore self-loops for stats
+
+            # Calculate Z-Score
+            matrix_mean = np.nanmean(costs_masked)
+            matrix_std = np.nanstd(costs_masked) + 1e-8
+            costs_feature_scaled = (costs_masked - matrix_mean) / matrix_std
+            
+            # 3. Extract Global Stats (Using the mathematically stable Z-scores)
+            stat_out_mean = np.nanmean(costs_feature_scaled, axis=1, keepdims=True)
+            stat_out_std  = np.nanstd(costs_feature_scaled, axis=1, keepdims=True)
+            stat_out_min  = np.nanmin(costs_feature_scaled, axis=1, keepdims=True)
+            stat_out_max  = np.nanmax(costs_feature_scaled, axis=1, keepdims=True)
+
+            stat_in_mean  = np.nanmean(costs_feature_scaled, axis=0, keepdims=True).T
+            stat_in_std   = np.nanstd(costs_feature_scaled, axis=0, keepdims=True).T
+            stat_in_min   = np.nanmin(costs_feature_scaled, axis=0, keepdims=True).T
+            stat_in_max   = np.nanmax(costs_feature_scaled, axis=0, keepdims=True).T
+
+            # 4. GENERATE GRAPH FIRST (Using raw costs for physical accuracy)
             if self.neighbors is not None:
+                # We use whatever knn_strat is passed (default or ANE)
                 graph_bytes = get_wind_knn_graph(loc, self.neighbors, self.knn_strat, costs)
             else:
-                graph_bytes = np.zeros((num_nodes, num_nodes)) # Fully connected fallback
+                graph_bytes = np.zeros((num_nodes, num_nodes)) 
+
+            # 5. ALWAYS EXTRACT SAMPLED COSTS (Unconditional Fat Vector Generation)
+            if isinstance(self.neighbors, float) and self.neighbors < 1.0:
+                k_val = int(num_nodes * self.neighbors)
+            else:
+                k_val = int(self.neighbors) if self.neighbors is not None else 20
+                
+            sampled_costs = np.zeros((num_nodes, k_val))
+            
+            mask = (graph_bytes == 0) 
+            max_scaled_cost = np.nanmax(costs_feature_scaled) 
+            
+            for i in range(num_nodes):
+                valid_costs = costs_feature_scaled[i][mask[i]]
+                sorted_costs = np.sort(valid_costs)
+                
+                if len(sorted_costs) >= k_val:
+                    sampled_costs[i] = sorted_costs[:k_val]
+                else:
+                    sampled_costs[i] = np.pad(sorted_costs, (0, k_val - len(sorted_costs)), constant_values=max_scaled_cost)
+
+            # 6. RETRO-COMPATIBLE SUPER-PACKING
+            baseline_features = np.concatenate([
+                loc, wind_repeated, alpha_repeated, 
+                stat_out_mean, stat_in_mean, stat_out_std, stat_in_std, 
+                stat_out_min, stat_in_min, stat_out_max, stat_in_max
+            ], axis=-1)
+
+            # ALWAYS append sampled_costs so the dimension is always perfectly 13 + k
+            nodes_feature = np.concatenate([baseline_features, sampled_costs], axis=-1)
             
             return {
                 'nodes': torch.FloatTensor(nodes_feature),
                 'graph': torch.ByteTensor(graph_bytes),
-                'cost_matrix': torch.FloatTensor(norm_costs)
+                'cost_matrix': torch.FloatTensor(norm_costs) # Unscaled for RL Reward
             }
-            
-        else:
-            # === Standard TSP Packing ===
-            nodes = self.nodes_coords[idx]
-            item = {
-                'nodes': torch.FloatTensor(nodes),
-                'graph': torch.ByteTensor(nearest_neighbor_graph(nodes, self.neighbors, self.knn_strat))
-            }
-            if self.supervised:
-                tour_nodes = self.tour_nodes[idx]
-                item['tour_nodes'] = torch.LongTensor(tour_nodes)
-                if self.nar:
-                    item['tour_edges'] = torch.LongTensor(tour_nodes_to_W(tour_nodes))
-
-            return item
-
-
-
-
-
-
-
-
-
-
 
 
 

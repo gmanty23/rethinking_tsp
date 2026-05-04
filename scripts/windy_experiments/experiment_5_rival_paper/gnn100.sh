@@ -4,14 +4,14 @@
 # HARDWARE & CONFIGURATION
 # ==================================================
 BATCH_SIZE=128        # Lowered to 128 to prevent OOM on N=100 GNNs
-NUM_WORKERS=18
+NUM_WORKERS=7
 MAX_PARALLEL_JOBS=2   # Running sequentially for safety
 
 # --- FIXED EXPERIMENT SETTINGS ---
 EPOCHS=49             
 PROBLEM="windy_tsp" 
 ENTROPY=0.05
-N_LAYERS=1
+N_LAYERS=2
 
 # Standardized Sizes
 VAL_SIZE=2048      
@@ -107,7 +107,7 @@ for GRAPH_SIZE in "${GRAPH_SIZES[@]}"; do
             for MODE in "${MODES[@]}"; do 
                 for NEIGHBOR in "${NEIGHBORS[@]}"; do
                 
-                    RUN_NAME="upgrade_ablation_gnn100_tsp${GRAPH_SIZE}_${MODE}_${FEAT}_ent${ENTROPY}_${STRAT}_n${NEIGHBOR}"
+                    RUN_NAME="upgrade_ablation_gnn100_tsp${GRAPH_SIZE}_${MODE}_${FEAT}_ent${ENTROPY}_${STRAT}_n${NEIGHBOR}_lay2"
                     RUN_LOG="${LOG_DIR}/${RUN_NAME}.log"
                     
                     # 1. SKIP CHECK: Does a folder with this configuration already exist? 
