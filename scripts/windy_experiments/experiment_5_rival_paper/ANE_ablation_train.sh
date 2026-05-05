@@ -4,8 +4,8 @@
 # HARDWARE & CONFIGURATION
 # ==================================================
 BATCH_SIZE=1024
-NUM_WORKERS=10
-MAX_PARALLEL_JOBS=2 # Reduced to 3 since we are only running 3 models total!
+NUM_WORKERS=5
+MAX_PARALLEL_JOBS=4 # Reduced to 3 since we are only running 3 models total!
 
 # --- FIXED EXPERIMENT SETTINGS ---
 EPOCHS=500
@@ -23,10 +23,10 @@ GRAPH_SIZES=(100)
 # We define the three distinct ablation architectures
 # Array format: "NODE_EMBEDDING_TYPE:NODE_FEATURE_TYPE"
 ABLATIONS=(
-    #"original:hybrid"   #(coords+stats)concatenated
+    "original:hybrid"   #(coords+stats)concatenated
     #"ane_pure:coords"   #(coords+local distances)gated
     #"ane_hybrid:coords" #((coords+local distances)gated+global stats)concatenated
-    #"ane_no_gate:coords" #(coords+local distances+global stats)concatenated
+    "ane_no_gate:coords" #(coords+local distances+global stats)concatenated
     "ane_3way_gate:coords" # (coords+local distances+global stats) gated
     "ane_stats_only:coords" # (coords+stats)gated
 )
@@ -117,7 +117,7 @@ for GRAPH_SIZE in "${GRAPH_SIZES[@]}"; do
             EMB_TYPE="${ABLATION%%:*}"
             FEAT_TYPE="${ABLATION##*:}"
             
-            RUN_NAME="mlp_ANEABLATION_tsp${GRAPH_SIZE}_${EMB_TYPE}_ent${ENTROPY}_neighbors${NEIGHBOR}"
+            RUN_NAME="mlp_ANEABLATION_tsp${GRAPH_SIZE}_${EMB_TYPE}_WIND_ent${ENTROPY}_neighbors${NEIGHBOR}"
             RUN_LOG="${LOG_DIR}/${RUN_NAME}.log"
                 
             # 1. SKIP CHECK: Does a folder with this configuration already exist?
@@ -155,6 +155,7 @@ for GRAPH_SIZE in "${GRAPH_SIZES[@]}"; do
                 --neighbors $NEIGHBOR \
                 --node_embedding_type $EMB_TYPE \
                 --node_feature_type $FEAT_TYPE \
+                --use_wind \
                 --run_name "$RUN_NAME" \
                 > "$RUN_LOG" 2>&1 &
         done

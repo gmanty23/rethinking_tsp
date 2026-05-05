@@ -67,6 +67,8 @@ def get_options(args=None):
                         help='Clip the parameters to within +- this value using tanh. Set to 0 to not do clipping.')
     
     # --- NEW ARGUMENTS FOR WINDY TSP ---
+    parser.add_argument('--use_wind', action='store_true',
+                        help="Inject explicit wind vectors (Wx, Wy) into the spatial coordinates.")
     parser.add_argument('--node_embedding_type', type=str, default='original', 
                         choices=['original', #(coords+stats)concatenated
                                  'ane_pure', #(coords+local distances)gated

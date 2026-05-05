@@ -120,6 +120,9 @@ class AttentionModel(nn.Module):
         # --- RRNCO Ablation Parameters ---
         self.node_embedding_type = kwargs.get('node_embedding_type', 'original')
         self.k_neighbors = kwargs.get('k_neighbors', 20) 
+        self.use_wind = kwargs.get('use_wind', False) 
+        # Determine spatial dimension dynamically
+        self.spatial_dim = 4 if self.use_wind else 2
         
         self.decode_type = None
         self.temp = 1.0
@@ -153,16 +156,14 @@ class AttentionModel(nn.Module):
             step_context_dim = 2 * embedding_dim
             
             # === FEATURE DIMENSION LOGIC ===
-            # 8 stats: Mean, Std, Min, Max (for both Out and In)
-            NUM_STATS = 8
+            NUM_STATS = 8             # 8 stats: Mean, Std, Min, Max (for both Out and In)
             if self.node_feature_type == 'hybrid':
-                node_dim = 2 + NUM_STATS # Coordinates + learned features
+                node_dim = self.spatial_dim + NUM_STATS 
             elif self.node_feature_type == 'learned':
                 node_dim = NUM_STATS
             elif self.node_feature_type == 'coords':
-                node_dim = 2
+                node_dim = self.spatial_dim
             else:
-                # For 'blank' mode, node_dim is irrelevant for the Linear layer
                 node_dim = 0
 
             # # === FEATURE DIMENSION LOGIC ===  #AQUI
@@ -186,7 +187,7 @@ class AttentionModel(nn.Module):
         
         if self.node_embedding_type in ane_models:
             # Shared Projections (used by almost all ANE variants)
-            self.proj_spatial = nn.Linear(2, embedding_dim)
+            self.proj_spatial = nn.Linear(self.spatial_dim, embedding_dim)
             self.proj_topo = nn.Linear(self.k_neighbors, embedding_dim)
             self.proj_stats = nn.Linear(8, embedding_dim)
             
@@ -202,7 +203,7 @@ class AttentionModel(nn.Module):
                 
             elif self.node_embedding_type == 'ane_no_gate':
                 # Compresses Coords (2) + Topology (k) + Stats (8) all at once
-                self.proj_no_gate = nn.Linear(2 + self.k_neighbors + 8, embedding_dim)
+                self.proj_no_gate = nn.Linear(self.spatial_dim + self.k_neighbors + 8, embedding_dim)
                 
             elif self.node_embedding_type == 'ane_3way_gate':
                 # Outputs 3 values per hidden dimension so we can apply a Softmax
@@ -420,6 +421,9 @@ class AttentionModel(nn.Module):
             
             # Slice the Fat Vector
             loc_flat = nodes[..., 0:2].view(-1, 2)
+            if self.use_wind:
+                wind_flat = nodes[..., 2:4].view(-1, 2)
+                loc_flat = torch.cat([loc_flat, wind_flat], dim=-1)
             topo_flat = nodes[..., 13 : 13 + self.k_neighbors].view(-1, self.k_neighbors)
             stats_flat = nodes[..., 5:13].view(-1, 8)
             
@@ -473,17 +477,21 @@ class AttentionModel(nn.Module):
             # Expand the learnable parameter [1, 1, H] -> [B, N, H]
             return self.init_embed_blank.expand(batch_size, num_nodes, -1)
 
-        # # 1. Slice based on feature type (coords/learned/hybrid)
+        # Decide whether to grab just X,Y (0:2) or X,Y,Wx,Wy (0:4)
+        if self.use_wind:
+            spatial_features = nodes[..., 0:4]
+        else:
+            spatial_features = nodes[..., 0:2]
+
+        # Slice based on feature type
         if nodes.size(-1) == 2:
             features = nodes
         elif self.node_feature_type == 'learned':
-            # Take all features from index 5 to the end
             features = nodes[..., 5:13] 
         elif self.node_feature_type == 'hybrid':
-            # Concatenate coords (0:2) with all stats (5:13)
-            features = torch.cat((nodes[..., 0:2], nodes[..., 5:13]), dim=-1)
+            features = torch.cat((spatial_features, nodes[..., 5:13]), dim=-1)
         else: # coords
-            features = nodes[..., 0:2]
+            features = spatial_features
 
         # # 1. Slice based on feature type (coords/learned/hybrid) AQUI
         # if nodes.size(-1) == 2:
