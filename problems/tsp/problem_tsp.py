@@ -315,7 +315,8 @@ class TSPDataset(Dataset):
                  knn_strat=None, supervised=False, nar=False, 
                  node_feature_type='coords',
                  problem_type='tsp',
-                 node_embedding_type='original'):
+                 node_embedding_type='original',
+                 legacy_mode=False):
         """Class representing a PyTorch dataset of TSP instances, which is fed to a dataloader
             Supports both Standard TSP (.txt) and Windy TSD (.pkl)
         """
@@ -339,6 +340,7 @@ class TSPDataset(Dataset):
         self.is_windy = False
         self.wind_data = None 
         self.node_embedding_type = node_embedding_type
+        self.legacy_mode = legacy_mode #features without normalization
 
 
         if filename is not None:
@@ -428,65 +430,101 @@ class TSPDataset(Dataset):
             # 2A. The RL Reward (Pure, unscaled exponential physics)
             norm_costs = costs.copy() 
 
-            # 2B. The Neural Network Features (Log + Z-Score)
-            # Take log to linearize the exponential explosion
-            costs_log = np.log(costs + 1e-8)
-            costs_masked = costs_log.copy()
-            np.fill_diagonal(costs_masked, np.nan) # Ignore self-loops for stats
+            # --- THE FEATURE/REWARD SPLIT ---
+            # 2A. The RL Reward (Pure, unscaled exponential physics)
+            norm_costs = costs.copy() 
 
-            # Calculate Z-Score
-            matrix_mean = np.nanmean(costs_masked)
-            matrix_std = np.nanstd(costs_masked) + 1e-8
-            costs_feature_scaled = (costs_masked - matrix_mean) / matrix_std
-            
-            # 3. Extract Global Stats (Using the mathematically stable Z-scores)
-            stat_out_mean = np.nanmean(costs_feature_scaled, axis=1, keepdims=True)
-            stat_out_std  = np.nanstd(costs_feature_scaled, axis=1, keepdims=True)
-            stat_out_min  = np.nanmin(costs_feature_scaled, axis=1, keepdims=True)
-            stat_out_max  = np.nanmax(costs_feature_scaled, axis=1, keepdims=True)
-
-            stat_in_mean  = np.nanmean(costs_feature_scaled, axis=0, keepdims=True).T
-            stat_in_std   = np.nanstd(costs_feature_scaled, axis=0, keepdims=True).T
-            stat_in_min   = np.nanmin(costs_feature_scaled, axis=0, keepdims=True).T
-            stat_in_max   = np.nanmax(costs_feature_scaled, axis=0, keepdims=True).T
-
-            # 4. GENERATE GRAPH FIRST (Using raw costs for physical accuracy)
-            if self.neighbors is not None:
-                # We use whatever knn_strat is passed (default or ANE)
-                graph_bytes = get_wind_knn_graph(loc, self.neighbors, self.knn_strat, costs)
-            else:
-                graph_bytes = np.zeros((num_nodes, num_nodes)) 
-
-            # 5. ALWAYS EXTRACT SAMPLED COSTS (Unconditional Fat Vector Generation)
-            if isinstance(self.neighbors, float) and self.neighbors < 1.0:
-                k_val = int(num_nodes * self.neighbors)
-            else:
-                k_val = int(self.neighbors) if self.neighbors is not None else 20
+            if self.legacy_mode:
+                # ==========================================
+                # LEGACY MODE (For evaluating old baselines)
+                # ==========================================
+                costs_masked = costs.copy()
+                np.fill_diagonal(costs_masked, np.nan) # Ignore self-loops
                 
-            sampled_costs = np.zeros((num_nodes, k_val))
-            
-            mask = (graph_bytes == 0) 
-            max_scaled_cost = np.nanmax(costs_feature_scaled) 
-            
-            for i in range(num_nodes):
-                valid_costs = costs_feature_scaled[i][mask[i]]
-                sorted_costs = np.sort(valid_costs)
-                
-                if len(sorted_costs) >= k_val:
-                    sampled_costs[i] = sorted_costs[:k_val]
+                # Extract Global Stats (Using RAW, UNNORMALIZED costs)
+                stat_out_mean = np.nanmean(costs_masked, axis=1, keepdims=True)
+                stat_out_std  = np.nanstd(costs_masked, axis=1, keepdims=True)
+                stat_out_min  = np.nanmin(costs_masked, axis=1, keepdims=True)
+                stat_out_max  = np.nanmax(costs_masked, axis=1, keepdims=True)
+
+                stat_in_mean  = np.nanmean(costs_masked, axis=0, keepdims=True).T
+                stat_in_std   = np.nanstd(costs_masked, axis=0, keepdims=True).T
+                stat_in_min   = np.nanmin(costs_masked, axis=0, keepdims=True).T
+                stat_in_max   = np.nanmax(costs_masked, axis=0, keepdims=True).T
+
+                if self.neighbors is not None:
+                    graph_bytes = get_wind_knn_graph(loc, self.neighbors, self.knn_strat, costs)
                 else:
-                    sampled_costs[i] = np.pad(sorted_costs, (0, k_val - len(sorted_costs)), constant_values=max_scaled_cost)
+                    graph_bytes = np.zeros((num_nodes, num_nodes))
 
-            # 6. RETRO-COMPATIBLE SUPER-PACKING
-            baseline_features = np.concatenate([
-                loc, wind_repeated, alpha_repeated, 
-                stat_out_mean, stat_in_mean, stat_out_std, stat_in_std, 
-                stat_out_min, stat_in_min, stat_out_max, stat_in_max
-            ], axis=-1)
+                # Old baseline features (exactly 13 dimensions, no sampled_costs attached)
+                nodes_feature = np.concatenate([
+                    loc, wind_repeated, alpha_repeated, 
+                    stat_out_mean, stat_in_mean, stat_out_std, stat_in_std, 
+                    stat_out_min, stat_in_min, stat_out_max, stat_in_max
+                ], axis=-1)
+                
+            else:
+                # ==========================================
+                # NEW MODE (For ANE and Upgraded Baselines)
+                # ==========================================
+                # 2B. The Neural Network Features (Log + Z-Score)
+                costs_log = np.log(costs + 1e-8)
+                costs_masked = costs_log.copy()
+                np.fill_diagonal(costs_masked, np.nan) # Ignore self-loops for stats
 
-            # ALWAYS append sampled_costs so the dimension is always perfectly 13 + k
-            nodes_feature = np.concatenate([baseline_features, sampled_costs], axis=-1)
-            
+                # Calculate Z-Score
+                matrix_mean = np.nanmean(costs_masked)
+                matrix_std = np.nanstd(costs_masked) + 1e-8
+                costs_feature_scaled = (costs_masked - matrix_mean) / matrix_std
+                
+                # 3. Extract Global Stats (Using the mathematically stable Z-scores)
+                stat_out_mean = np.nanmean(costs_feature_scaled, axis=1, keepdims=True)
+                stat_out_std  = np.nanstd(costs_feature_scaled, axis=1, keepdims=True)
+                stat_out_min  = np.nanmin(costs_feature_scaled, axis=1, keepdims=True)
+                stat_out_max  = np.nanmax(costs_feature_scaled, axis=1, keepdims=True)
+
+                stat_in_mean  = np.nanmean(costs_feature_scaled, axis=0, keepdims=True).T
+                stat_in_std   = np.nanstd(costs_feature_scaled, axis=0, keepdims=True).T
+                stat_in_min   = np.nanmin(costs_feature_scaled, axis=0, keepdims=True).T
+                stat_in_max   = np.nanmax(costs_feature_scaled, axis=0, keepdims=True).T
+
+                # 4. GENERATE GRAPH FIRST (Using raw costs for physical accuracy)
+                if self.neighbors is not None:
+                    graph_bytes = get_wind_knn_graph(loc, self.neighbors, self.knn_strat, costs)
+                else:
+                    graph_bytes = np.zeros((num_nodes, num_nodes)) 
+
+                # 5. ALWAYS EXTRACT SAMPLED COSTS (Unconditional Fat Vector Generation)
+                if isinstance(self.neighbors, float) and self.neighbors < 1.0:
+                    k_val = int(num_nodes * self.neighbors)
+                else:
+                    k_val = int(self.neighbors) if self.neighbors is not None else 20
+                    
+                sampled_costs = np.zeros((num_nodes, k_val))
+                
+                mask = (graph_bytes == 0) 
+                max_scaled_cost = np.nanmax(costs_feature_scaled) 
+                
+                for i in range(num_nodes):
+                    valid_costs = costs_feature_scaled[i][mask[i]]
+                    sorted_costs = np.sort(valid_costs)
+                    
+                    if len(sorted_costs) >= k_val:
+                        sampled_costs[i] = sorted_costs[:k_val]
+                    else:
+                        sampled_costs[i] = np.pad(sorted_costs, (0, k_val - len(sorted_costs)), constant_values=max_scaled_cost)
+
+                # 6. RETRO-COMPATIBLE SUPER-PACKING
+                baseline_features = np.concatenate([
+                    loc, wind_repeated, alpha_repeated, 
+                    stat_out_mean, stat_in_mean, stat_out_std, stat_in_std, 
+                    stat_out_min, stat_in_min, stat_out_max, stat_in_max
+                ], axis=-1)
+
+                # ALWAYS append sampled_costs so the dimension is always perfectly 13 + k
+                nodes_feature = np.concatenate([baseline_features, sampled_costs], axis=-1)
+
             return {
                 'nodes': torch.FloatTensor(nodes_feature),
                 'graph': torch.ByteTensor(graph_bytes),

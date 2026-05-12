@@ -4,6 +4,7 @@ import math
 import os
 import time
 import argparse
+from xml.parsers.expat import model
 import numpy as np
 from tqdm import tqdm
 import torch
@@ -26,7 +27,10 @@ def eval_dataset(dataset_path, decode_strategy, width, softmax_temp, opts):
     device = torch.device("cuda:0" if use_cuda else "cpu")
     dataset = model.problem.make_dataset(
         filename=dataset_path, batch_size=opts.batch_size, num_samples=opts.val_size, 
-        neighbors=model_args['neighbors'], knn_strat=model_args['knn_strat'], supervised=True
+        neighbors=model_args.get('neighbors', 20), 
+        knn_strat=model_args.get('knn_strat', 'None'), 
+        node_feature_type=model_args.get('node_feature_type', 'coords'),
+        supervised=True
     )
     
     results = _eval_dataset(model, dataset, decode_strategy, width, softmax_temp, opts, device)

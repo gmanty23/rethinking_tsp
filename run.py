@@ -121,7 +121,8 @@ def _run_rl(opts):
         node_feature_type=opts.node_feature_type,
         gnn_direction_mode=opts.gnn_direction_mode,
         node_embedding_type=opts.node_embedding_type,
-        k_neighbors=derived_k
+        k_neighbors=derived_k,
+        use_wind=opts.use_wind
     ).to(opts.device)
 
     if opts.use_cuda and torch.cuda.device_count() > 1:
@@ -190,13 +191,40 @@ def _run_rl(opts):
         )
     )
 
-    # Load optimizer state
+    # Load optimizer state safely
     if 'optimizer' in load_data:
-        optimizer.load_state_dict(load_data['optimizer'])
-        for state in optimizer.state.values():
-            for k, v in state.items():
-                if torch.is_tensor(v):
-                    state[k] = v.to(opts.device)
+        try:
+            opt_state = load_data['optimizer']
+            
+            # --- THE PROACTIVE SHAPE INSPECTOR ---
+            # Manually check the shapes of the saved momentum buffers against the model
+            if len(optimizer.param_groups) > 0 and len(opt_state['param_groups']) > 0:
+                model_params = optimizer.param_groups[0]['params']
+                saved_param_ids = opt_state['param_groups'][0]['params']
+                
+                for p, saved_id in zip(model_params, saved_param_ids):
+                    if saved_id in opt_state['state']:
+                        s = opt_state['state'][saved_id]
+                        # If Adam's exponential moving average exists, check its shape
+                        if 'exp_avg' in s and p.shape != s['exp_avg'].shape:
+                            raise RuntimeError(f"Shape mismatch! Model needs {p.shape}, but saved state has {s['exp_avg'].shape}")
+            # -------------------------------------
+
+            # If the inspector passes, load the state
+            optimizer.load_state_dict(opt_state)
+            for state in optimizer.state.values():
+                for k, v in state.items():
+                    if torch.is_tensor(v):
+                        state[k] = v.to(opts.device)
+            print("Successfully loaded optimizer state.")
+            
+        except Exception as e:
+            print("\n" + "!"*50)
+            print("WARNING: Optimizer state index mismatch detected!")
+            print(f"Error: {e}")
+            print("Dropping optimizer state to start with fresh momentum.")
+            print("Don't worry - your model weights are perfectly safe!")
+            print("!"*50 + "\n")
 
     # Initialize learning rate scheduler, decay by lr_decay once per epoch!
     lr_scheduler = optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: opts.lr_decay ** epoch)
@@ -325,13 +353,40 @@ def _run_sl(opts):
     # Initialize optimizer
     optimizer = optim.Adam([{'params': model.parameters(), 'lr': opts.lr_model}])
 
-    # Load optimizer state
+    # Load optimizer state safely
     if 'optimizer' in load_data:
-        optimizer.load_state_dict(load_data['optimizer'])
-        for state in optimizer.state.values():
-            for k, v in state.items():
-                if torch.is_tensor(v):
-                    state[k] = v.to(opts.device)
+        try:
+            opt_state = load_data['optimizer']
+            
+            # --- THE PROACTIVE SHAPE INSPECTOR ---
+            # Manually check the shapes of the saved momentum buffers against the model
+            if len(optimizer.param_groups) > 0 and len(opt_state['param_groups']) > 0:
+                model_params = optimizer.param_groups[0]['params']
+                saved_param_ids = opt_state['param_groups'][0]['params']
+                
+                for p, saved_id in zip(model_params, saved_param_ids):
+                    if saved_id in opt_state['state']:
+                        s = opt_state['state'][saved_id]
+                        # If Adam's exponential moving average exists, check its shape
+                        if 'exp_avg' in s and p.shape != s['exp_avg'].shape:
+                            raise RuntimeError(f"Shape mismatch! Model needs {p.shape}, but saved state has {s['exp_avg'].shape}")
+            # -------------------------------------
+
+            # If the inspector passes, load the state
+            optimizer.load_state_dict(opt_state)
+            for state in optimizer.state.values():
+                for k, v in state.items():
+                    if torch.is_tensor(v):
+                        state[k] = v.to(opts.device)
+            print("Successfully loaded optimizer state.")
+            
+        except Exception as e:
+            print("\n" + "!"*50)
+            print("WARNING: Optimizer state index mismatch detected!")
+            print(f"Error: {e}")
+            print("Dropping optimizer state to start with fresh momentum.")
+            print("Don't worry - your model weights are perfectly safe!")
+            print("!"*50 + "\n")
 
     # Initialize learning rate scheduler, decay by lr_decay once per epoch!
     lr_scheduler = optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: opts.lr_decay ** epoch)

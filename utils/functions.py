@@ -124,8 +124,17 @@ def load_model(path, epoch=None, extra_logging=False):
         'mlp': MLPEncoder,
         'none': IdentityEncoder
     }.get(args.get('encoder', 'gnn'), None)
+    
     assert encoder_class is not None, "Unknown encoder: {}".format(encoder_class)
     
+    # Re-calculate derived_k exactly like in run.py
+    neighbors_val = args.get('neighbors', 20)
+    max_size_val = args.get('max_size', 100)
+    if isinstance(neighbors_val, float) and neighbors_val < 1.0:
+        derived_k = int(max_size_val * neighbors_val)
+    else:
+        derived_k = int(neighbors_val) if neighbors_val is not None else 20
+
     model = model_class(
         problem=problem,
         embedding_dim=args['embedding_dim'],
@@ -148,7 +157,10 @@ def load_model(path, epoch=None, extra_logging=False):
 
         # Restore Windy TSP arguments from saved args.json
         node_feature_type=args.get('node_feature_type', 'coords'),
-        gnn_direction_mode=args.get('gnn_direction_mode', 'forward')
+        gnn_direction_mode=args.get('gnn_direction_mode', 'forward'),
+        node_embedding_type=args.get('node_embedding_type', 'original'),
+        k_neighbors=derived_k,
+        use_wind=args.get('use_wind', False)
     )    
     
 

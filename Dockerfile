@@ -38,13 +38,8 @@ RUN conda env create -f environment.yml
 SHELL ["conda", "run", "-n", "tsp_modern", "/bin/bash", "-c"]
 
 # Copy the rest of the project codebase
-# COPY . .
 #COPY . .
 
 # Set the entrypoint to automatically activate the environment when you run the container
 ENTRYPOINT ["conda", "run", "--no-capture-output", "-n", "tsp_modern"]
 CMD ["/bin/bash"]
-
-
-
-# docker run --user $(id -u):$(id -g) --gpus all -it --rm --ipc=host -v $(pwd):/workspace windy-tsp-modern:latest bash

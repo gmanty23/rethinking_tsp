@@ -3,9 +3,9 @@
 # ==================================================
 # HARDWARE & CONFIGURATION
 # ==================================================
-BATCH_SIZE=1024
-NUM_WORKERS=5
-MAX_PARALLEL_JOBS=4 # Reduced to 3 since we are only running 3 models total!
+BATCH_SIZE=512
+NUM_WORKERS=10
+MAX_PARALLEL_JOBS=2 
 
 # --- FIXED EXPERIMENT SETTINGS ---
 EPOCHS=500
