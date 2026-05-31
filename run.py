@@ -19,6 +19,8 @@ from nets.critic_network import CriticNetwork
 from nets.encoders.gat_encoder import GraphAttentionEncoder
 from nets.encoders.gnn_encoder import GNNEncoder
 from nets.encoders.mlp_encoder import MLPEncoder, IdentityEncoder
+from nets.encoders.edge_gat_encoder import EdgeGATEncoder
+from nets.encoders.aafm_encoder import AAFMEncoder
 
 from reinforce_baselines import NoBaseline, ExponentialBaseline, CriticBaseline, RolloutBaseline, WarmupBaseline
 
@@ -29,8 +31,14 @@ warnings.filterwarnings("ignore", message="indexing with dtype torch.uint8 is no
 
 
 def run(opts):
-    """Top level method to run experiments for SL and RL
-    """
+    """Top level method to run experiments for SL and RL"""
+    
+    # --- ADD THESE 3 LINES FOR RTX 5000/4000/3000 SPEEDUP ---
+    torch.set_float32_matmul_precision('high')
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    # --------------------------------------------------------
+
     if opts.problem == 'tspsl':
         _run_sl(opts)
     else:
@@ -81,6 +89,8 @@ def _run_rl(opts):
     encoder_class = {
         'gnn': GNNEncoder,
         'gat': GraphAttentionEncoder,
+        'edge_gat': EdgeGATEncoder,
+        'aafm': AAFMEncoder,
         'mlp': MLPEncoder,
         'none': IdentityEncoder
     }.get(opts.encoder, None)
@@ -122,8 +132,11 @@ def _run_rl(opts):
         gnn_direction_mode=opts.gnn_direction_mode,
         node_embedding_type=opts.node_embedding_type,
         k_neighbors=derived_k,
-        use_wind=opts.use_wind
+        use_wind=opts.use_wind,
+        nab_mode=opts.nab_mode,
+        gnn_deep_bias=opts.gnn_deep_bias
     ).to(opts.device)
+
 
     if opts.use_cuda and torch.cuda.device_count() > 1:
         model = torch.nn.DataParallel(model)

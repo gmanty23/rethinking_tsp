@@ -48,7 +48,7 @@ class MultiHeadAttention(nn.Module):
             stdv = 1. / math.sqrt(param.size(-1))
             param.data.uniform_(-stdv, stdv)
 
-    def forward(self, q, h=None, mask=None):
+    def forward(self, q, h=None, mask=None, nab_bias = None):
         """
         :param q: queries (batch_size, n_query, input_dim)
         :param h: data (batch_size, graph_size, input_dim)
@@ -81,9 +81,20 @@ class MultiHeadAttention(nn.Module):
         # Calculate compatibility (n_heads, batch_size, n_query, graph_size)
         compatibility = self.norm_factor * torch.matmul(Q, K.transpose(2, 3))
 
+        if nab_bias is not None:
+            # nab_bias is (Batch, N, N). We add a dimension for n_heads so it broadcasts properly.
+            compatibility = compatibility + nab_bias.unsqueeze(0)
+
         # Optionally apply mask to prevent attention
         if mask is not None:
-            compatibility[mask[None, :, :, :].expand_as(compatibility)] = -1e10
+            # Clone mask to avoid modifying original, cast to bool
+            bool_mask = mask.bool().clone()
+            
+            # SAFEGUARD: Unmask the diagonal (self-loops) to prevent Softmax NaNs
+            idx = torch.arange(bool_mask.size(-1), device=bool_mask.device)
+            bool_mask[..., idx, idx] = False 
+            
+            compatibility[bool_mask[None, :, :, :].expand_as(compatibility)] = -1e10
 
         attn = F.softmax(compatibility, dim=-1)
 
@@ -166,8 +177,8 @@ class MultiHeadAttentionLayer(nn.Module):
             )
         self.norm2 = Normalization(embed_dim, norm, learn_norm, track_norm)
 
-    def forward(self, h, mask):
-        h = self.self_attention(h, mask=mask)
+    def forward(self, h, mask, nab_bias = None):
+        h = h + self.self_attention.module(h, mask=mask, nab_bias=nab_bias)
         h = self.norm1(h, mask=mask)
         h = self.positionwise_ff(h, mask=mask)
         h = self.norm2(h, mask=mask)
@@ -187,7 +198,7 @@ class GraphAttentionEncoder(nn.Module):
                 for _ in range(n_layers)
         ])
 
-    def forward(self, x, graph):
+    def forward(self, x, graph, cost_matrix=None, nab_bias=None):
         for layer in self.layers:
-            x = layer(x, graph)
+            x = layer(x, graph, nab_bias=nab_bias)
         return x

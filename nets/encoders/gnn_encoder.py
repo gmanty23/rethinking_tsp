@@ -74,7 +74,7 @@ class GNNLayer(nn.Module):
             "batch": nn.BatchNorm1d(hidden_dim, affine=learn_norm, track_running_stats=track_norm)
         }.get(self.norm, None)
         
-    def forward(self, h, e, graph):
+    def forward(self, h, e, graph, deep_nab = None):
         """
         Args:
             h: Input node features (B x V x H)
@@ -98,7 +98,14 @@ class GNNLayer(nn.Module):
         Ce = self.C(e)  # B x V x V x H
 
         # Update edge features and compute edge gates
-        e = Ah.unsqueeze(1) + Bh.unsqueeze(2) + Ce  # B x V x V x H
+        e_tmp = Ah.unsqueeze(1) + Bh.unsqueeze(2) + Ce  # B x V x V x H
+        
+        # === DEEP NAB INJECTION ===
+        if deep_nab is not None:
+            # Inject the structural wind bias directly into the gating calculation
+            e_tmp = e_tmp + deep_nab
+            
+        e = e_tmp # Reassign to 'e' so your normalization and residual code below works seamlessly
         gates = torch.sigmoid(e)  # B x V x V x H
 
         # ===== Directional Aggregation Logic =====
@@ -213,7 +220,7 @@ class GNNEncoder(nn.Module):
     """
     
     def __init__(self, n_layers, hidden_dim, aggregation="sum", norm="layer", 
-                 learn_norm=True, track_norm=False, gated=True, gnn_direction_mode = 'forward', *args, **kwargs):
+                 learn_norm=True, track_norm=False, gated=True, gnn_direction_mode = 'forward', gnn_deep_bias=False, *args, **kwargs):
         super(GNNEncoder, self).__init__()
 
         # 1. Keep Legacy Support (Standard TSP uses binary graph 0/1)
@@ -222,13 +229,16 @@ class GNNEncoder(nn.Module):
         # 2. Add New Support (Windy TSP uses continuous cost values)
         self.init_lin_edges = nn.Linear(1, hidden_dim)
 
+        # 3. GNN Layer Configurations
+        self.gnn_deep_bias = gnn_deep_bias
+
         self.layers = nn.ModuleList([
             GNNLayer(hidden_dim, aggregation, norm, learn_norm, track_norm, gated, gnn_direction_mode)
             for _ in range(n_layers)
         ])
 
 
-    def forward(self, x, graph, cost_matrix=None):
+    def forward(self, x, graph, cost_matrix=None, nab_bias=None, **kwargs):
         """
         Args:
             x: Input node features (B x V x H)
@@ -237,19 +247,27 @@ class GNNEncoder(nn.Module):
             Updated node features (B x V x H)
         """
 
-        # Choose initialization based on input availability
-        if cost_matrix is not None:
+        # 1. Choose Layer 0 initialization (MUST use elif to prevent overwriting!)
+        if nab_bias is not None:
+            # --- The NAB-GNN Ablation ---
+            e = self.init_lin_edges(nab_bias.unsqueeze(-1))
+        elif cost_matrix is not None: 
             # --- Windy TSP Path ---
-            # Project scalar costs (floats) to hidden_dim
-            # Reshape from [B, V, V] -> [B, V, V, 1] for Linear layer
-            e = self.init_lin_edges(cost_matrix.unsqueeze(-1)) 
+            # This prevents the GNN's internal Sigmoid gates from instantly saturating.
+            safe_costs = torch.log(cost_matrix + 1e-8)
+            e = self.init_lin_edges(safe_costs.unsqueeze(-1))
         else:
             # --- Standard TSP Path (Legacy) ---
-            # Embed binary connections (0 or 1)
             e = self.init_embed_edges(graph.type(torch.long))
 
-        # Pass through GNN Layers
+        # 2. Project Deep NAB if the ablation flag is turned on
+        deep_nab = None
+        if self.gnn_deep_bias and nab_bias is not None:
+            deep_nab = self.init_lin_edges(nab_bias.unsqueeze(-1))
+
+        # 3. Pass through GNN Layers
         for layer in self.layers:
-            x, e = layer(x, e, graph)
+            # We must explicitly pass the deep_nab tensor into the layer!
+            x, e = layer(x, e, graph, deep_nab=deep_nab)
 
         return x

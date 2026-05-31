@@ -261,13 +261,18 @@ def compare_models_to_lkh(coords_model_path, stats_model_path, hybrid_model_path
     plt.savefig(out_img, format='png', bbox_inches='tight')
     print(f"[*] Visual comparison saved to '{out_img}'")
 
+    #save it too in svg format for vector graphics in paper
+    out_svg = f"visualizations/solution_visualization/PAPER_2_gap_comparison_idx{target_idx}_seed{seed}.svg"
+    plt.savefig(out_svg, format='svg', bbox_inches='tight')
+    print(f"[*] Visual comparison saved to '{out_svg}'")
+
 if __name__ == "__main__":
     COORDS_MODEL = "outputs/002_exp1_confidence_og_stats/05ConfOgStats_ent0.2_exp1/exp1_coords_ent0.2_20251223T185323/epoch-99.pt"
     STATS_MODEL = "outputs/windy_tsp_20-20/003_exp1_new_stats/06ConfNewStats_ent0.05_exp1/stats_learned_ent0.05_20251227T132116/epoch-99.pt"
     HYBRID_MODEL = "outputs/windy_tsp_20-20/008_exp3_graph_sparsification/13Random_Sparsification/tsp20_dual_hybrid_ent0.05_random20_20260302T160327/epoch-99.pt"
     DATASET = "data/windy_tsp/windy_tsp20_val.pkl"
     LKH_BASELINE = "results/windy_tsp20_val/windy_tsp20_valn1280-lkh_windy.pkl"
-    INDEX = 97
+    INDEX = 803
     SEED = None
 
     compare_models_to_lkh(COORDS_MODEL, STATS_MODEL, HYBRID_MODEL, DATASET, LKH_BASELINE, SEED, INDEX)

@@ -41,8 +41,8 @@ def get_options(args=None):
     # Model/GNN Encoder
     parser.add_argument('--model', default='attention', 
                         help="Model: 'attention'/'nar'")
-    parser.add_argument('--encoder', default='gnn', choices=['gat', 'gnn', 'mlp', 'aafm'],
-                        help="Graph encoder: 'gat'/'gnn'/'mlp'")
+    parser.add_argument('--encoder', default='gnn', choices=['gat', 'gnn', 'mlp', 'aafm', 'edge_gat'],
+                        help="Graph encoder: 'gat'/'gnn'/'mlp'/'aafm'/'edge_gat'")
     parser.add_argument('--embedding_dim', type=int, default=128, 
                         help='Dimension of input embedding')
     parser.add_argument('--hidden_dim', type=int, default=128, 
@@ -82,6 +82,15 @@ def get_options(args=None):
                         help="Feature type for Windy TSP: 'coords' (x,y), 'learned' (stats), 'hybrid' (both), or 'blank' (learned completely from blank parameter).")
     parser.add_argument('--gnn_direction_mode', type=str, default='forward', choices=['forward', 'backward', 'dual'],
                         help="Directional aggregation for GNN: 'forward' (standard), 'backward' (outgoing), 'dual' (bi-directional).")
+    parser.add_argument('--nab_mode', type=str, default='none', 
+                        choices=['none', 'encoder', 'decoder', 'both', 'aafm'],
+                        help="Where to apply the Neural Adaptive Bias matrix.")
+    parser.add_argument('--gnn_deep_bias', action='store_true', 
+                        help='Inject NAB bias deeply into every GNN layer instead of just Layer 0')
+    # (Optional for Phase 2)
+    # parser.add_argument('--nab_features', type=str, default='all', 
+    #                     choices=['cost', 'dist_cost', 'all'],
+    #                     help="Which matrices to fuse in the NAB generator.")
     #-----------------------------------
 
     # # --- RRNCO ABLATION ARGUMENTS ---

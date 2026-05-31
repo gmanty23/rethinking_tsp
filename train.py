@@ -78,7 +78,15 @@ def rollout(model, dataset, opts):
     
     def eval_model_bat(bat):
         with torch.no_grad():
-            cost, _ = model(move_to(bat['nodes'], opts.device), move_to(bat['graph'], opts.device))
+            # Grab the cost matrix if it's available in the batch
+            cost_mat = move_to(bat['cost_matrix'], opts.device) if 'cost_matrix' in bat else None
+            
+            # Pass cost_matrix to the model
+            cost, _ = model(
+                move_to(bat['nodes'], opts.device), 
+                move_to(bat['graph'], opts.device),
+                cost_matrix=cost_mat
+            )
         return cost.data.cpu()
 
     return torch.cat([

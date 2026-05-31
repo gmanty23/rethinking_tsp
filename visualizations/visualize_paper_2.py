@@ -88,7 +88,7 @@ def plot_tour_heatmap(ax, coords, tour, cost_matrix, title, cost, gap, wind_vect
                 zorder=2)
     
     # Add wind label
-    ax.text(center[0], center[1], f"WIND\nMag: 1.6743", color='blue', alpha=0.6, 
+    ax.text(center[0], center[1], f"WIND\nMag: {wind_mag:.4f}", color='blue', alpha=0.6, 
             fontsize=15, fontweight='bold', ha='center', va='center')
     
     # Include Gap in the Title
@@ -256,13 +256,18 @@ def compare_models_to_lkh(coords_model_path, stats_model_path, hybrid_model_path
     plt.savefig(out_img, dpi=300, bbox_inches='tight')
     print(f"[*] Visual comparison saved to '{out_img}'")
 
+    #save in SVG format for vector graphics in paper
+    out_svg = f"visualizations/solution_visualization/Z_PAPER_gap_comparison_idx{target_idx}_seed{seed}.svg"
+    plt.savefig(out_svg, dpi=300, bbox_inches='tight')
+    print(f"[*] Visual comparison saved to '{out_svg}'")    
+
 if __name__ == "__main__":
     COORDS_MODEL = "outputs/002_exp1_confidence_og_stats/05ConfOgStats_ent0.2_exp1/exp1_coords_ent0.2_20251223T185323/epoch-99.pt"
     STATS_MODEL = "outputs/windy_tsp_20-20/003_exp1_new_stats/06ConfNewStats_ent0.05_exp1/stats_learned_ent0.05_20251227T132116/epoch-99.pt"
-    HYBRID_MODEL = "outputs/windy_tsp_20-20/008_exp3_graph_sparsification/13Random_Sparsification/tsp20_dual_hybrid_ent0.05_random20_20260302T160327/epoch-99.pt"
+    HYBRID_MODEL = "outputs/windy_tsp_20-20/008_exp3_graph_sparsification/13Random_Sparsification/tsp20_backward_hybrid_ent0.2_random20_20260302T144028/epoch-99.pt"
     DATASET = "data/windy_tsp/windy_tsp20_val.pkl"
     LKH_BASELINE = "results/windy_tsp20_val/windy_tsp20_valn1280-lkh_windy.pkl"
-    INDEX = 97
+    INDEX = 803
     SEED = None
 
     compare_models_to_lkh(COORDS_MODEL, STATS_MODEL, HYBRID_MODEL, DATASET, LKH_BASELINE, SEED, INDEX)

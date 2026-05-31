@@ -50,8 +50,8 @@ def clean_model_folder(folder_path, keep_numbers):
     print(f"Total space saved: {get_readable_size(total_space_saved)}")
 
 # --- CONFIGURATION ---
-TARGET_FOLDER = "outputs/windy_tsp_100-100/mlp_ANEABLATION_tsp100_original_WIND_ent0.05_neighbors0.25_20260506T134921" 
-MODELS_TO_KEEP = [99, 199, 299, 399, 497, 499] #492, 499 ,599, 699, 799, 883, 899] # The script will look for epoch-99.pt, etc.
+TARGET_FOLDER = "outputs/windy_tsp_100-100/resume_original_wind_20260513T083258" 
+MODELS_TO_KEEP = [599, 699, 799, 899, 968, 999] #492, 499 ,599, 699, 799, 883, 899] # The script will look for epoch-99.pt, etc.
 
 if __name__ == "__main__":
     clean_model_folder(TARGET_FOLDER, MODELS_TO_KEEP)

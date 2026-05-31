@@ -13,7 +13,61 @@ from utils.tensor_functions import compute_in_batches
 from utils.beam_search import CachedLookup
 from utils.functions import sample_many
 
+class NABGenerator(nn.Module):
+    """Generates the Neural Adaptive Bias (A) matrix from Distance, Angle, and Cost."""
+    def __init__(self, embed_dim):
+        super(NABGenerator, self).__init__()
+        
+        # MLPs for each matrix (Eq 11-13)
+        self.W_D = nn.Sequential(nn.Linear(1, embed_dim), nn.ReLU(), nn.Linear(embed_dim, embed_dim))
+        self.W_Phi = nn.Sequential(nn.Linear(1, embed_dim), nn.ReLU(), nn.Linear(embed_dim, embed_dim))
+        self.W_T = nn.Sequential(nn.Linear(1, embed_dim), nn.ReLU(), nn.Linear(embed_dim, embed_dim))
+        
+        # Gating components (Eq 14)
+        self.W_G = nn.Linear(3 * embed_dim, 3) 
+        self.tau = nn.Parameter(torch.tensor(1.0)) # Learnable temperature
+        
+        # Final projection to scalar (Eq 16)
+        self.w_out = nn.Linear(embed_dim, 1, bias=False)
 
+    def forward(self, coords, cost_matrix):
+        # coords: (B, N, 2)
+        # cost_matrix: (B, N, N)
+        
+        # 1. Calculate Distance (D) and Angle (Phi) Matrices
+        diff = coords.unsqueeze(2) - coords.unsqueeze(1) # (B, N, N, 2)
+        # SAFEGUARD: Clamp before sqrt to prevent NaN gradients on self-loops (dist=0)
+        D = (diff ** 2).sum(dim=-1, keepdim=True).clamp(min=1e-12).sqrt() # (B, N, N, 1)
+        Phi = torch.atan2(diff[..., 1], diff[..., 0]).unsqueeze(-1) # (B, N, N, 1)
+        T = cost_matrix.unsqueeze(-1)                    # (B, N, N, 1)
+
+        # 2. Embed each matrix
+        E_D = self.W_D(D)
+        E_Phi = self.W_Phi(Phi)
+        E_T = self.W_T(T)
+
+        # 3. Multi-channel Gating
+        concat = torch.cat([E_D, E_Phi, E_T], dim=-1)
+        gates = F.softmax(self.W_G(concat) / self.tau, dim=-1) # (B, N, N, 3)
+
+        # 4. Fused Representation (Eq 15)
+        H = (gates[..., 0:1] * E_D) + (gates[..., 1:2] * E_Phi) + (gates[..., 2:3] * E_T)
+        
+        # 5. Project to Bias Matrix A (Eq 16)
+        A = self.w_out(H).squeeze(-1) # Output shape: (B, N, N)
+
+        # ==========================================================
+        # DEEP LEARNING STABILITY TOGGLE
+        # Set to True to clip biases between -10 and +10. 
+        # This prevents Softmax saturation in the GAT, AAFM, and Decoder.
+        # Set to False to replicate the exact unclipped RRNCO Eq. 16.
+        # ==========================================================
+        USE_TANH_CLIPPING = True 
+        
+        if USE_TANH_CLIPPING:
+            A = 10.0 * torch.tanh(A)
+
+        return A
 
 class AttentionModelFixed(NamedTuple):
     """
@@ -25,6 +79,7 @@ class AttentionModelFixed(NamedTuple):
     glimpse_key: torch.Tensor
     glimpse_val: torch.Tensor
     logit_key: torch.Tensor
+    nab_bias: torch.Tensor = None  
 
     def __getitem__(self, key):
         if torch.is_tensor(key) or isinstance(key, slice):
@@ -33,7 +88,8 @@ class AttentionModelFixed(NamedTuple):
                 context_node_projected=self.context_node_projected[key],
                 glimpse_key=self.glimpse_key[:, key],  # dim 0 are the heads
                 glimpse_val=self.glimpse_val[:, key],  # dim 0 are the heads
-                logit_key=self.logit_key[key]
+                logit_key=self.logit_key[key],
+                nab_bias=self.nab_bias[key] if self.nab_bias is not None else None
             )
         return tuple.__getitem__(self, key)
 
@@ -121,6 +177,12 @@ class AttentionModel(nn.Module):
         self.node_embedding_type = kwargs.get('node_embedding_type', 'original')
         self.k_neighbors = kwargs.get('k_neighbors', 20) 
         self.use_wind = kwargs.get('use_wind', False) 
+        
+        self.nab_mode = kwargs.get('nab_mode', 'none')
+        if self.nab_mode != 'none':
+            #Initialization of the NAB generator
+            self.nab_generator = NABGenerator(embedding_dim)
+
         # Determine spatial dimension dynamically
         self.spatial_dim = 4 if self.use_wind else 2
         
@@ -228,7 +290,8 @@ class AttentionModel(nn.Module):
                                            learn_norm=learn_norm,
                                            track_norm=track_norm,
                                            gated=gated,
-                                           gnn_direction_mode=gnn_direction_mode) 
+                                           gnn_direction_mode=gnn_direction_mode,
+                                           **kwargs) 
 
         # For each node we compute (glimpse key, glimpse value, logit key) so 3 * embedding_dim
         self.project_node_embeddings = nn.Linear(embedding_dim, 3 * embedding_dim, bias=False)
@@ -254,22 +317,31 @@ class AttentionModel(nn.Module):
                        (Not compatible with DataParallel as the results
                         may be of different lengths on different GPUs)
         """
-        # Embed input batch
+        # Generate NAB Matrix if applicable
+        nab_bias = None
+        if self.nab_mode in ['encoder', 'decoder', 'both']:
+            coords = nodes[..., 0:2] 
+            nab_bias = self.nab_generator(coords, cost_matrix)
+
+        # Route to Encoder
+        enc_bias = nab_bias if self.nab_mode in ['encoder', 'both'] else None
         if self.checkpoint_encoder:
-            # Pass cost_matrix to the embedder (GNNEncoder)
-            embeddings = checkpoint(self.embedder, self._init_embed(nodes), graph, cost_matrix)
+            embeddings = checkpoint(self.embedder, self._init_embed(nodes), graph, cost_matrix, enc_bias)
         else:
-            embeddings = self.embedder(self._init_embed(nodes), graph, cost_matrix=cost_matrix)
+            embeddings = self.embedder(self._init_embed(nodes), graph, cost_matrix=cost_matrix, nab_bias=enc_bias)
         
         if self.extra_logging:
             self.embeddings_batch = embeddings
+
+        # Route to Decoder
+        dec_bias = nab_bias if self.nab_mode in ['decoder', 'both'] else None
 
         # Supervised learning
         if self.problem.NAME == 'tspsl' and supervised:
             assert targets is not None, "Pass targets during training in supervised mode"
             
             # Run inner function
-            _log_p, pi = self._inner(nodes, graph, embeddings, supervised=supervised, targets=targets)
+            _log_p, pi = self._inner(nodes, graph, embeddings, supervised=supervised, targets=targets, nab_bias=dec_bias)
             
             if self.extra_logging:
                 self.log_p_batch = _log_p
@@ -291,7 +363,7 @@ class AttentionModel(nn.Module):
         # Reinforcement learning or inference
         else:
             # Run inner function
-            _log_p, pi = self._inner(nodes, graph, embeddings)
+            _log_p, pi = self._inner(nodes, graph, embeddings, nab_bias=dec_bias)
             
             if self.extra_logging:
                 self.log_p_batch = _log_p
@@ -332,12 +404,18 @@ class AttentionModel(nn.Module):
         """
         return self.problem.beam_search(*args, **kwargs, model=self)
 
-    def precompute_fixed(self, nodes, graph):
-        embeddings = self.embedder(self._init_embed(nodes), graph)
-        # Use a CachedLookup such that if we repeatedly index this object with 
-        # the same index, we only need to do the lookup once... 
-        # this is the case if all elements in the batch have maximum batch size
-        return CachedLookup(self._precompute(embeddings))
+    def precompute_fixed(self, nodes, graph, cost_matrix=None):
+        nab_bias = None
+        if getattr(self, 'nab_mode', 'none') in ['encoder', 'decoder', 'both']:
+            coords = nodes[..., 0:2] 
+            assert cost_matrix is not None, "cost_matrix must be provided for NAB generation!"
+            nab_bias = self.nab_generator(coords, cost_matrix)
+
+        enc_bias = nab_bias if self.nab_mode in ['encoder', 'both'] else None
+        embeddings = self.embedder(self._init_embed(nodes), graph, cost_matrix=cost_matrix, nab_bias=enc_bias)
+        
+        dec_bias = nab_bias if self.nab_mode in ['decoder', 'both'] else None
+        return CachedLookup(self._precompute(embeddings, nab_bias=dec_bias))
 
     def propose_expansions(self, beam, fixed, expand_size=None, normalize=False, max_calc_batch_size=4096):
         # First dim = batch_size * cur_beam_size
@@ -522,7 +600,7 @@ class AttentionModel(nn.Module):
             print(f"[CRASH LOG] Features stats - Min: {features.min()}, Max: {features.max()}, NaNs: {torch.isnan(features).any()}")
             raise e
 
-    def _inner(self, nodes, graph, embeddings, supervised=False, targets=None):
+    def _inner(self, nodes, graph, embeddings, supervised=False, targets=None, nab_bias=None):
         outputs = []
         sequences = []
         
@@ -530,7 +608,7 @@ class AttentionModel(nn.Module):
         state = self.problem.make_state(nodes, graph)
 
         # Compute keys, values for the glimpse and keys for the logits for reuse
-        fixed = self._precompute(embeddings)
+        fixed = self._precompute(embeddings, nab_bias=nab_bias)
 
         batch_size, num_nodes, _ = nodes.shape
 
@@ -620,7 +698,7 @@ class AttentionModel(nn.Module):
         
         return selected
 
-    def _precompute(self, embeddings, num_steps=1):
+    def _precompute(self, embeddings, num_steps=1, nab_bias=None):
         # The fixed context projection of the graph embedding is calculated only once for efficiency
         if self.aggregation_graph == "sum":
             graph_embed = embeddings.sum(1)
@@ -644,7 +722,7 @@ class AttentionModel(nn.Module):
             self._make_heads(glimpse_val_fixed, num_steps),
             logit_key_fixed.contiguous()
         )
-        return AttentionModelFixed(embeddings, fixed_context, *fixed_attention_node_data)
+        return AttentionModelFixed(embeddings, fixed_context, *fixed_attention_node_data, nab_bias=nab_bias)
 
     def _get_log_p_topk(self, fixed, state, k=None, normalize=True):
         log_p, _ = self._get_log_p(fixed, state, normalize=normalize)
@@ -676,8 +754,26 @@ class AttentionModel(nn.Module):
             # Compute the graph mask, for masking next action based on graph structure 
             graph_mask = state.get_graph_mask()
 
+        # === SLICE THE NAB BIAS FOR THE CURRENT NODE ===
+        step_nab_bias = None
+        if fixed.nab_bias is not None:
+            current_node = state.get_current_node() # Shape: (Batch, Steps)
+            batch_size, num_steps = current_node.size()
+            
+            if state.i.item() == 0:
+                # First step: The agent isn't at a node yet, so no wind penalty applies
+                step_nab_bias = torch.zeros(batch_size, num_steps, fixed.nab_bias.size(-1), device=fixed.nab_bias.device)
+            else:
+                # Extract the row corresponding to the current node
+                step_nab_bias = torch.gather(
+                    fixed.nab_bias, 
+                    1, 
+                    current_node.unsqueeze(-1).expand(batch_size, num_steps, fixed.nab_bias.size(-1))
+                )
+
         # Compute logits (unnormalized log_p)
-        log_p, glimpse = self._one_to_many_logits(query, glimpse_K, glimpse_V, logit_K, mask, graph_mask)
+        # Pass the step_nab_bias down to _one_to_many_logits
+        log_p, glimpse = self._one_to_many_logits(query, glimpse_K, glimpse_V, logit_K, mask, graph_mask, nab_bias=step_nab_bias)
 
         if normalize:
             log_p = F.log_softmax(log_p / self.temp, dim=-1)
@@ -766,7 +862,7 @@ class AttentionModel(nn.Module):
                 ), 2)
             ), 1)
 
-    def _one_to_many_logits(self, query, glimpse_K, glimpse_V, logit_K, mask, graph_mask=None):
+    def _one_to_many_logits(self, query, glimpse_K, glimpse_V, logit_K, mask, graph_mask=None, nab_bias=None):
         batch_size, num_steps, embed_dim = query.size()
         key_size = val_size = embed_dim // self.n_heads
 
@@ -775,6 +871,12 @@ class AttentionModel(nn.Module):
         
         # Batch matrix multiplication to compute compatibilities (n_heads, batch_size, num_steps, graph_size)
         compatibility = torch.matmul(glimpse_Q, glimpse_K.transpose(-2, -1)) / math.sqrt(glimpse_Q.size(-1))
+
+        # === INJECT NAB INTO GLIMPSE ===
+        if nab_bias is not None:
+            # nab_bias is (Batch, Steps, Nodes). Add Head Dimension.
+            compatibility = compatibility + nab_bias.unsqueeze(0).unsqueeze(-2)
+            
         if self.mask_inner:
             assert self.mask_logits, "Cannot mask inner without masking logits"
             compatibility[mask.bool()[None, :, :, None, :].expand_as(compatibility)] = -1e10
@@ -796,6 +898,9 @@ class AttentionModel(nn.Module):
         logits = torch.matmul(final_Q, logit_K.transpose(-2, -1)).squeeze(-2) / math.sqrt(final_Q.size(-1))
         
         # From the logits compute the probabilities by masking the graph, clipping, and masking visited
+        # === INJECT NAB INTO LOGITS ===
+        if nab_bias is not None:
+            logits = logits + nab_bias
         if self.mask_logits and self.mask_graph:
             logits[graph_mask] = -1e10 
         if self.tanh_clipping > 0:

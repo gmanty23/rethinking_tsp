@@ -4,7 +4,7 @@ import os
 import numpy as np
 
 # Load the dataframe
-df = pd.read_csv('results/ane_ablation_full.csv')
+df = pd.read_csv('results/ane_ablation_full_2.csv')
 
 # Output directory
 out_dir = 'visualizations/csv_eval/EXP5_RIVAL'

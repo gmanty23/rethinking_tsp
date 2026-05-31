@@ -466,28 +466,29 @@ class TSPDataset(Dataset):
                 
             else:
                 # ==========================================
-                # NEW MODE (For ANE and Upgraded Baselines)
+                # NEW MODE (For ANE and Upgraded Baselines) (Safe Log-Compression + Raw Stats)
                 # ==========================================
-                # 2B. The Neural Network Features (Log + Z-Score)
+                # 1. FIX: Calculate Global Stats using RAW costs!
+                # This restores the massive spikes the MLP and Critic need to learn effectively.
+                raw_costs_masked = costs.copy()
+                np.fill_diagonal(raw_costs_masked, np.nan) # Ignore self-loops for stats
+
+                stat_out_mean = np.nanmean(raw_costs_masked, axis=1, keepdims=True)
+                stat_out_std  = np.nanstd(raw_costs_masked, axis=1, keepdims=True)
+                stat_out_min  = np.nanmin(raw_costs_masked, axis=1, keepdims=True)
+                stat_out_max  = np.nanmax(raw_costs_masked, axis=1, keepdims=True)
+
+                stat_in_mean  = np.nanmean(raw_costs_masked, axis=0, keepdims=True).T
+                stat_in_std   = np.nanstd(raw_costs_masked, axis=0, keepdims=True).T
+                stat_in_min   = np.nanmin(raw_costs_masked, axis=0, keepdims=True).T
+                stat_in_max   = np.nanmax(raw_costs_masked, axis=0, keepdims=True).T
+
+                # 2. FIX: Safe Log-Compression for the Attention Encoders (NO Z-SCORE!)
+                # We take the log to prevent FP16 explosions, but we DO NOT subtract 
+                # the instance mean so the RL Critic doesn't go blind to global difficulty!
                 costs_log = np.log(costs + 1e-8)
-                costs_masked = costs_log.copy()
-                np.fill_diagonal(costs_masked, np.nan) # Ignore self-loops for stats
-
-                # Calculate Z-Score
-                matrix_mean = np.nanmean(costs_masked)
-                matrix_std = np.nanstd(costs_masked) + 1e-8
-                costs_feature_scaled = (costs_masked - matrix_mean) / matrix_std
-                
-                # 3. Extract Global Stats (Using the mathematically stable Z-scores)
-                stat_out_mean = np.nanmean(costs_feature_scaled, axis=1, keepdims=True)
-                stat_out_std  = np.nanstd(costs_feature_scaled, axis=1, keepdims=True)
-                stat_out_min  = np.nanmin(costs_feature_scaled, axis=1, keepdims=True)
-                stat_out_max  = np.nanmax(costs_feature_scaled, axis=1, keepdims=True)
-
-                stat_in_mean  = np.nanmean(costs_feature_scaled, axis=0, keepdims=True).T
-                stat_in_std   = np.nanstd(costs_feature_scaled, axis=0, keepdims=True).T
-                stat_in_min   = np.nanmin(costs_feature_scaled, axis=0, keepdims=True).T
-                stat_in_max   = np.nanmax(costs_feature_scaled, axis=0, keepdims=True).T
+                costs_feature_scaled = costs_log.copy()
+                np.fill_diagonal(costs_feature_scaled, np.nan)
 
                 # 4. GENERATE GRAPH FIRST (Using raw costs for physical accuracy)
                 if self.neighbors is not None:

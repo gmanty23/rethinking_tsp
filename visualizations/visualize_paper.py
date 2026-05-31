@@ -243,12 +243,17 @@ def compare_models_to_lkh(orig_model_path, imp_model_path, dataset_path, lkh_pat
     plt.savefig(out_img, dpi=300, bbox_inches='tight')
     print(f"[*] Visual comparison saved to '{out_img}'")
 
+    #save in SVG format for vector graphics in paper
+    out_svg = f"visualizations/solution_visualization/PAPER_gap_comparison_idx{target_idx}_seed{seed}.svg"
+    plt.savefig(out_svg, dpi=300, bbox_inches='tight')
+    print(f"[*] Visual comparison saved to '{out_svg}'")
+
 if __name__ == "__main__":
     ORIG_MODEL = "outputs/002_exp1_confidence_og_stats/05ConfOgStats_ent0.2_exp1/exp1_coords_ent0.2_20251223T185323/epoch-99.pt"
     IMP_MODEL = "outputs/windy_tsp_20-20/008_exp3_graph_sparsification/13Random_Sparsification/tsp20_dual_hybrid_ent0.05_random20_20260302T160327/epoch-99.pt"
     DATASET = "data/windy_tsp/windy_tsp20_val.pkl"
     LKH_BASELINE = "results/windy_tsp20_val/windy_tsp20_valn1280-lkh_windy.pkl"
-    INDEX = 379
+    INDEX = 97
     SEED = None
 
     compare_models_to_lkh(ORIG_MODEL, IMP_MODEL, DATASET, LKH_BASELINE, SEED, INDEX)
