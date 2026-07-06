@@ -1,3 +1,8 @@
+# Explanation of the script:
+# This script is designed to clean up a folder containing model checkpoint files named in the format "epoch-N.pt". 
+# It will keep only the specified epochs and delete the rest, while providing a summary of the actions taken and the space saved.
+# If SEARCH_SUBFOLDERS is True, it will also scan and clean all nested directories inside the target folder.
+
 import os
 
 def get_readable_size(size_bytes):
@@ -7,7 +12,7 @@ def get_readable_size(size_bytes):
             return f"{size_bytes:.2f} {unit}"
         size_bytes /= 1024.0
 
-def clean_model_folder(folder_path, keep_numbers):
+def clean_model_folder(folder_path, keep_numbers, recursive=False):
     # Construct the exact filenames to keep based on the 'epoch-n.pt' pattern
     keep_filenames = {f"epoch-{str(n)}.pt" for n in keep_numbers}
     
@@ -20,15 +25,32 @@ def clean_model_folder(folder_path, keep_numbers):
 
     print(f"--- Analysis of: {folder_path} ---")
     print(f"Targeting pattern: epoch-N.pt")
+    print(f"Searching Subfolders: {recursive}")
     print(f"Keeping: {', '.join(keep_filenames)}\n")
     
-    for filename in os.listdir(folder_path):
+    # Gather all files based on the recursive flag
+    files_to_check = []
+    if recursive:
+        # os.walk travels down through every subfolder
+        for root, _, files in os.walk(folder_path):
+            for f in files:
+                files_to_check.append((root, f))
+    else:
+        # os.listdir only grabs what is directly inside the top folder
+        for f in os.listdir(folder_path):
+            files_to_check.append((folder_path, f))
+
+    for directory, filename in files_to_check:
         # Only look at files that match the naming convention
         if filename.startswith("epoch-") and filename.endswith(".pt"):
-            file_path = os.path.join(folder_path, filename)
+            file_path = os.path.join(directory, filename)
+            
+            # Ensure we are looking at a file and not a weirdly named directory
+            if not os.path.isfile(file_path):
+                continue
             
             if filename in keep_filenames:
-                print(f"[KEEPING]  {filename}")
+                print(f"[KEEPING]  {file_path}")
             else:
                 file_size = os.path.getsize(file_path)
                 total_space_saved += file_size
@@ -37,9 +59,9 @@ def clean_model_folder(folder_path, keep_numbers):
                 try:
                     # --- ACTION ZONE ---
                     os.remove(file_path) # <--- UNCOMMENT TO ACTUALLY DELETE
-                    print(f"[DELETING] {filename} ({get_readable_size(file_size)})")
+                    print(f"[DELETING] {file_path} ({get_readable_size(file_size)})")
                 except Exception as e:
-                    print(f"[ERROR]    Could not delete {filename}: {e}")
+                    print(f"[ERROR]    Could not delete {file_path}: {e}")
 
     print("-" * 40)
     # Visual reminder about dry run
@@ -50,8 +72,9 @@ def clean_model_folder(folder_path, keep_numbers):
     print(f"Total space saved: {get_readable_size(total_space_saved)}")
 
 # --- CONFIGURATION ---
-TARGET_FOLDER = "outputs/windy_tsp_100-100/resume_original_wind_20260513T083258" 
-MODELS_TO_KEEP = [599, 699, 799, 899, 968, 999] #492, 499 ,599, 699, 799, 883, 899] # The script will look for epoch-99.pt, etc.
+TARGET_FOLDER = "outputs/windy_tsp_100-100/initial_rival_study" 
+MODELS_TO_KEEP = [0, 1, 49, 48, 98, 99] # The script will look for epoch-99.pt, etc.
+SEARCH_SUBFOLDERS = True # Set to True to clean all nested folders, False for just the root folder
 
 if __name__ == "__main__":
-    clean_model_folder(TARGET_FOLDER, MODELS_TO_KEEP)
+    clean_model_folder(TARGET_FOLDER, MODELS_TO_KEEP, recursive=SEARCH_SUBFOLDERS)

@@ -129,37 +129,25 @@ def eval_dataset(model, dataset, lkh_costs, decode_strategy, width, softmax_temp
     
     for batch in tqdm(dataloader, disable=opts.no_progress_bar, ascii=True):
         nodes, graph = move_to(batch['nodes'], device), move_to(batch['graph'], device)
+        cost_matrix = move_to(batch['cost_matrix'], device) if 'cost_matrix' in batch else None
         
+        # ==========================================================
+        # 1. PURE INFERENCE (TIMED)
+        # ==========================================================
         start = time.time()
         with torch.no_grad():
-
-            # --- CAPTURE EMBEDDINGS AND CALCULATE VARIANCE & ENERGY ---
-            try:
-                if hasattr(model, 'embedder'):
-                    h = model._init_embed(nodes)
-                    embeddings = model.embedder(h, graph.clone())
-                    
-                    var = compute_embedding_variance(embeddings)
-                    batch_variances.append(var.mean().item())
-                    
-                    energy = compute_dirichlet_energy(embeddings, graph.clone())
-                    batch_energies.append(energy.item())
-                    
-            except Exception as e:
-                print(f"\n[!] Error calculando métricas latentes: {e}")
-            # -------------------------------------------------
             
             # --- STRATEGY 1: GREEDY ---
             if decode_strategy == 'greedy':
                 costs, ll, sequences, entropy = model(
                     nodes, graph, 
+                    cost_matrix=cost_matrix, 
                     return_pi=True, 
                     return_entropy=True
                 )
                 
                 seq_len = nodes.size(1)
                 confidence = (ll / seq_len).exp().cpu().numpy()
-                
                 costs = costs.cpu().numpy()
                 sequences = sequences.cpu().numpy()
                 
@@ -170,7 +158,8 @@ def eval_dataset(model, dataset, lkh_costs, decode_strategy, width, softmax_temp
                 cum_log_p, sequences, raw_costs, ids, batch_size = model.beam_search(
                     nodes, graph, beam_size=run_width,
                     compress_mask=opts.compress_mask,
-                    max_calc_batch_size=opts.max_calc_batch_size
+                    max_calc_batch_size=opts.max_calc_batch_size,
+                    cost_matrix=cost_matrix
                 )
                 
                 seq_len = nodes.size(1) 
@@ -186,21 +175,46 @@ def eval_dataset(model, dataset, lkh_costs, decode_strategy, width, softmax_temp
                         batch_size
                     )
                     
-                    seq_tensor = torch.tensor(sequences, device=device)
+                    seq_tensor = torch.tensor(np.array(sequences), device=device)
                     true_costs, _ = model.problem.get_costs(nodes, seq_tensor)
                     costs = true_costs.cpu().numpy()
-                    
-            # --- STRATEGY 3: SAMPLING ---
-            else:
-                sequences, raw_costs = model.sample_many(nodes, graph, batch_rep=width, iter_rep=1)
-                confidence = [0] * len(raw_costs) 
-                
-                seq_tensor = torch.tensor(sequences, device=device) if not torch.is_tensor(sequences) else sequences
-                true_costs, _ = model.problem.get_costs(nodes, seq_tensor)
-                costs = true_costs.cpu().numpy()
 
+        # >> STOP TIMER: Only standard network inference is captured! <<
         duration = time.time() - start
-        
+
+
+        # ==========================================================
+        # 2. LATENT METRICS ANALYSIS (NOT TIMED)
+        # ==========================================================
+        with torch.no_grad():
+            try:
+                if hasattr(model, 'embedder'):
+                    h = model._init_embed(nodes)
+                    
+                    # Generate NAB locally to avoid the CachedLookup object entirely
+                    nab_bias = None
+                    if getattr(model, 'nab_mode', 'none') in ['encoder', 'decoder', 'both'] and cost_matrix is not None:
+                        coords = nodes[..., 0:2]
+                        safe_costs_nab = torch.log(cost_matrix + 1e-8)
+                        nab_bias = model.nab_generator(coords, safe_costs_nab)
+                        
+                    enc_bias = nab_bias if getattr(model, 'nab_mode', 'none') in ['encoder', 'both'] else None
+                    
+                    # Generate clean embeddings directly from the embedder
+                    embeddings = model.embedder(h, graph.clone(), cost_matrix=cost_matrix, nab_bias=enc_bias)
+                    
+                    var = compute_embedding_variance(embeddings)
+                    batch_variances.append(var.mean().item())
+                    
+                    energy = compute_dirichlet_energy(embeddings, graph.clone())
+                    batch_energies.append(energy.item())
+                    
+            except Exception as e:
+                print(f"\n[!] Error calculando métricas latentes: {e}")
+
+        # ==========================================================
+
+        # Format results per instance
         for i, cost in enumerate(costs):
             results.append((cost, duration, confidence[i] if isinstance(confidence, (list, np.ndarray)) else 0))
 

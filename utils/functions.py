@@ -94,6 +94,8 @@ def load_model(path, epoch=None, extra_logging=False):
     from nets.encoders.gat_encoder import GraphAttentionEncoder
     from nets.encoders.gnn_encoder import GNNEncoder
     from nets.encoders.mlp_encoder import MLPEncoder, IdentityEncoder
+    from nets.encoders.edge_gat_encoder import EdgeGATEncoder
+    from nets.encoders.aafm_encoder import AAFMEncoder
     
     if os.path.isfile(path):
         model_filename = path
@@ -122,7 +124,9 @@ def load_model(path, epoch=None, extra_logging=False):
         'gnn': GNNEncoder,
         'gat': GraphAttentionEncoder,
         'mlp': MLPEncoder,
-        'none': IdentityEncoder
+        'none': IdentityEncoder,
+        'edge_gat': EdgeGATEncoder,
+        'aafm': AAFMEncoder
     }.get(args.get('encoder', 'gnn'), None)
     
     assert encoder_class is not None, "Unknown encoder: {}".format(encoder_class)
@@ -160,7 +164,10 @@ def load_model(path, epoch=None, extra_logging=False):
         gnn_direction_mode=args.get('gnn_direction_mode', 'forward'),
         node_embedding_type=args.get('node_embedding_type', 'original'),
         k_neighbors=derived_k,
-        use_wind=args.get('use_wind', False)
+        use_wind=args.get('use_wind', False),
+        # Restore NAB arguments from saved args.json
+        nab_mode=args.get('nab_mode', 'both'),
+        gnn_deep_bias=args.get('gnn_deep_bias', False),
     )    
     
 
@@ -221,6 +228,8 @@ def do_batch_rep(v, n):
         return [do_batch_rep(v_, n) for v_ in v]
     elif isinstance(v, tuple):
         return tuple(do_batch_rep(v_, n) for v_ in v)
+    elif v is None:            
+        return None            
 
     return v[None, ...].expand(n, *v.size()).contiguous().view(-1, *v.size()[1:])
 

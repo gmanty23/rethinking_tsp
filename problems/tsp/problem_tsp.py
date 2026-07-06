@@ -206,13 +206,15 @@ class TSP(object):
 
     @staticmethod
     def beam_search(nodes, graph, beam_size, expand_size=None,
-                    compress_mask=False, model=None, max_calc_batch_size=4096):
+                    compress_mask=False, model=None, max_calc_batch_size=4096, 
+                    cost_matrix=None): # 1. ADD THIS ARGUMENT
         """Method to call beam search, given TSP samples and a model
         """
 
         assert model is not None, "Provide model"
 
-        fixed = model.precompute_fixed(nodes, graph)
+        # 2. PASS IT DOWN TO PRECOMPUTE_FIXED
+        fixed = model.precompute_fixed(nodes, graph, cost_matrix=cost_matrix)
 
         def propose_expansions(beam):
             return model.propose_expansions(
@@ -468,27 +470,46 @@ class TSPDataset(Dataset):
                 # ==========================================
                 # NEW MODE (For ANE and Upgraded Baselines) (Safe Log-Compression + Raw Stats)
                 # ==========================================
-                # 1. FIX: Calculate Global Stats using RAW costs!
-                # This restores the massive spikes the MLP and Critic need to learn effectively.
-                raw_costs_masked = costs.copy()
-                np.fill_diagonal(raw_costs_masked, np.nan) # Ignore self-loops for stats
+                # # 1. FIX: Calculate Global Stats using RAW costs!
+                # # This restores the massive spikes the MLP and Critic need to learn effectively.
+                # raw_costs_masked = costs.copy()
+                # np.fill_diagonal(raw_costs_masked, np.nan) # Ignore self-loops for stats
 
-                stat_out_mean = np.nanmean(raw_costs_masked, axis=1, keepdims=True)
-                stat_out_std  = np.nanstd(raw_costs_masked, axis=1, keepdims=True)
-                stat_out_min  = np.nanmin(raw_costs_masked, axis=1, keepdims=True)
-                stat_out_max  = np.nanmax(raw_costs_masked, axis=1, keepdims=True)
+                # stat_out_mean = np.nanmean(raw_costs_masked, axis=1, keepdims=True)
+                # stat_out_std  = np.nanstd(raw_costs_masked, axis=1, keepdims=True)
+                # stat_out_min  = np.nanmin(raw_costs_masked, axis=1, keepdims=True)
+                # stat_out_max  = np.nanmax(raw_costs_masked, axis=1, keepdims=True)
 
-                stat_in_mean  = np.nanmean(raw_costs_masked, axis=0, keepdims=True).T
-                stat_in_std   = np.nanstd(raw_costs_masked, axis=0, keepdims=True).T
-                stat_in_min   = np.nanmin(raw_costs_masked, axis=0, keepdims=True).T
-                stat_in_max   = np.nanmax(raw_costs_masked, axis=0, keepdims=True).T
+                # stat_in_mean  = np.nanmean(raw_costs_masked, axis=0, keepdims=True).T
+                # stat_in_std   = np.nanstd(raw_costs_masked, axis=0, keepdims=True).T
+                # stat_in_min   = np.nanmin(raw_costs_masked, axis=0, keepdims=True).T
+                # stat_in_max   = np.nanmax(raw_costs_masked, axis=0, keepdims=True).T
 
-                # 2. FIX: Safe Log-Compression for the Attention Encoders (NO Z-SCORE!)
-                # We take the log to prevent FP16 explosions, but we DO NOT subtract 
-                # the instance mean so the RL Critic doesn't go blind to global difficulty!
+                # # 2. FIX: Safe Log-Compression for the Attention Encoders (NO Z-SCORE!)
+                # # We take the log to prevent FP16 explosions, but we DO NOT subtract 
+                # # the instance mean so the RL Critic doesn't go blind to global difficulty!
+                # costs_log = np.log(costs + 1e-8)
+                # costs_feature_scaled = costs_log.copy()
+                # np.fill_diagonal(costs_feature_scaled, np.nan)
+
+
+                # 1. Safe Log-Compression (NO Z-SCORE!)
+                # We take the log to prevent FP16 explosions in the GAT attention, 
+                # but we DO NOT subtract the instance mean so the RL Critic doesn't go blind!
                 costs_log = np.log(costs + 1e-8)
                 costs_feature_scaled = costs_log.copy()
                 np.fill_diagonal(costs_feature_scaled, np.nan)
+
+                # 2. Calculate Global Stats using safely compressed costs!
+                stat_out_mean = np.nanmean(costs_feature_scaled, axis=1, keepdims=True)
+                stat_out_std  = np.nanstd(costs_feature_scaled, axis=1, keepdims=True)
+                stat_out_min  = np.nanmin(costs_feature_scaled, axis=1, keepdims=True)
+                stat_out_max  = np.nanmax(costs_feature_scaled, axis=1, keepdims=True)
+
+                stat_in_mean  = np.nanmean(costs_feature_scaled, axis=0, keepdims=True).T
+                stat_in_std   = np.nanstd(costs_feature_scaled, axis=0, keepdims=True).T
+                stat_in_min   = np.nanmin(costs_feature_scaled, axis=0, keepdims=True).T
+                stat_in_max   = np.nanmax(costs_feature_scaled, axis=0, keepdims=True).T
 
                 # 4. GENERATE GRAPH FIRST (Using raw costs for physical accuracy)
                 if self.neighbors is not None:

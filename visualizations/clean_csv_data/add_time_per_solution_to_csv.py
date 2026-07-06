@@ -70,8 +70,8 @@ def add_solution_time_column(input_path, output_path, batch_size=128, time_col_n
         print(f"An unexpected error occurred: {e}")
 
 # --- Configuration ---
-input_csv = 'results/gnn100.csv'    # The file from the previous step
-output_csv = '/home/pfc/gms/code/rethinking_tsp/results/evaluations/09_gnn100_time_per_solution.csv'         # The new file to create
+input_csv = 'results/nab_ablation_neighbors.csv'    # The file from the previous step
+output_csv = 'results/nab_ablation_neighbors_time.csv'         # The new file to create
 BATCH_SIZE = 128
 TARGET_COLUMN = 'Time_Per_Inst'       
 

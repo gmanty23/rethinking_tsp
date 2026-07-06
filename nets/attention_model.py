@@ -321,7 +321,8 @@ class AttentionModel(nn.Module):
         nab_bias = None
         if self.nab_mode in ['encoder', 'decoder', 'both']:
             coords = nodes[..., 0:2] 
-            nab_bias = self.nab_generator(coords, cost_matrix)
+            safe_costs_nab = torch.log(cost_matrix + 1e-8)  # Add small constant to prevent log(0)
+            nab_bias = self.nab_generator(coords, safe_costs_nab)
 
         # Route to Encoder
         enc_bias = nab_bias if self.nab_mode in ['encoder', 'both'] else None
@@ -409,7 +410,8 @@ class AttentionModel(nn.Module):
         if getattr(self, 'nab_mode', 'none') in ['encoder', 'decoder', 'both']:
             coords = nodes[..., 0:2] 
             assert cost_matrix is not None, "cost_matrix must be provided for NAB generation!"
-            nab_bias = self.nab_generator(coords, cost_matrix)
+            safe_costs_nab = torch.log(cost_matrix + 1e-8)  # Add small constant to prevent log(0)
+            nab_bias = self.nab_generator(coords, safe_costs_nab)
 
         enc_bias = nab_bias if self.nab_mode in ['encoder', 'both'] else None
         embeddings = self.embedder(self._init_embed(nodes), graph, cost_matrix=cost_matrix, nab_bias=enc_bias)
