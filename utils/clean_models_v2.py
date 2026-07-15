@@ -72,8 +72,8 @@ def clean_model_folder(folder_path, keep_numbers, recursive=False):
     print(f"Total space saved: {get_readable_size(total_space_saved)}")
 
 # --- CONFIGURATION ---
-TARGET_FOLDER = "outputs/windy_tsp_100-100/initial_rival_study" 
-MODELS_TO_KEEP = [0, 1, 49, 48, 98, 99] # The script will look for epoch-99.pt, etc.
+TARGET_FOLDER = "outputs/NAB-CLIPPED-V3_GNN_NEIGHBOURS_ablation" 
+MODELS_TO_KEEP = [0, 24, 49,  74, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99] # The script will look for epoch-99.pt, etc.
 SEARCH_SUBFOLDERS = True # Set to True to clean all nested folders, False for just the root folder
 
 if __name__ == "__main__":
