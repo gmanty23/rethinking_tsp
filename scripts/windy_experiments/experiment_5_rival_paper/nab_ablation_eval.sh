@@ -2,12 +2,12 @@
 
 # Define Paths
 VAL_DATA="data/windy_tsp/windy_tsp100_val.pkl"
-OUT_CSV="results/nab_ablation_neighbors.csv"
+OUT_CSV="results/PAPER_RESULTS/V3-ANE_AAFM_ABLATION.csv"
 LOG_FILE="results/nab_ablation_neighbors.txt" 
 
 # Collect ALL checkpoint models across all subfolders
 # The wildcard /*/epoch-*.pt looks inside every subfolder and grabs every checkpoint
-MODELS=$(ls outputs/NAB-CLIPPED-V3_ablation_TIME_CALC_2/windy_tsp_100-100/*/epoch-*.pt)
+MODELS=$(ls outputs/FINAL_PAPER/V3-ANE_AAFM_ABLATION/*/epoch-*.pt)
 
 echo "==================================================" | tee -a "$LOG_FILE"
 echo "Starting Comprehensive NAB Ablation Evaluation..." | tee -a "$LOG_FILE"

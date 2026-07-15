@@ -44,7 +44,7 @@ def compute_dirichlet_energy(embeddings, graph=None):
     # Si recibimos un grafo, vamos a limpiarlo y verificar si tiene aristas reales
     if graph is not None and isinstance(graph, torch.Tensor) and graph.dim() == 3 and graph.shape[1] == N:
         # 1. Binarizar por si el tensor contiene costes/pesos en lugar de adyacencia
-        binary_graph = (graph != 0).float()
+        binary_graph = (graph == 0).float()
         
         # 2. Eliminar las conexiones del nodo consigo mismo (self-loops)
         binary_graph = binary_graph * mask
@@ -123,18 +123,106 @@ def eval_dataset(model, dataset, lkh_costs, decode_strategy, width, softmax_temp
 
     dataloader = DataLoader(dataset, batch_size=opts.batch_size, shuffle=False, num_workers=opts.num_workers)
 
+    # ==========================================================
+    # 0. GPU WARM-UP (CALENTAMIENTO)
+    # ==========================================================
+    # Tomamos el primer batch del dataloader solo para calentar
+    warmup_batch = next(iter(dataloader))
+    w_nodes, w_graph = move_to(warmup_batch['nodes'], device), move_to(warmup_batch['graph'], device)
+    w_cost_matrix = move_to(warmup_batch['cost_matrix'], device) if 'cost_matrix' in warmup_batch else None
+
+    # Hacemos 3 pasadas de mentira para que CUDA asigne memoria y compile kernels
+    with torch.no_grad():
+        for _ in range(3):
+            if decode_strategy == 'greedy':
+                model(
+                    w_nodes, w_graph, 
+                    cost_matrix=w_cost_matrix, 
+                    return_pi=True, 
+                    return_entropy=True
+                )
+            elif decode_strategy == 'bs':
+                run_width = max(1, width)
+                model.beam_search(
+                    w_nodes, w_graph, beam_size=run_width,
+                    compress_mask=opts.compress_mask,
+                    max_calc_batch_size=opts.max_calc_batch_size,
+                    cost_matrix=w_cost_matrix
+                )
+                
+    # Sincronizamos para asegurar que todo el trabajo basura ha terminado
+    if device.type == 'cuda':
+        torch.cuda.synchronize(device)
+    # ==========================================================
+
     results = []
     batch_variances = []  
-    batch_energies = []   
+    batch_energies = []
     
     for batch in tqdm(dataloader, disable=opts.no_progress_bar, ascii=True):
         nodes, graph = move_to(batch['nodes'], device), move_to(batch['graph'], device)
         cost_matrix = move_to(batch['cost_matrix'], device) if 'cost_matrix' in batch else None
         
+        # # ==========================================================
+        # # 1. PURE INFERENCE (TIMED)
+        # # ==========================================================
+        # start = time.time()
+        # with torch.no_grad():
+            
+        #     # --- STRATEGY 1: GREEDY ---
+        #     if decode_strategy == 'greedy':
+        #         costs, ll, sequences, entropy = model(
+        #             nodes, graph, 
+        #             cost_matrix=cost_matrix, 
+        #             return_pi=True, 
+        #             return_entropy=True
+        #         )
+                
+        #         seq_len = nodes.size(1)
+        #         confidence = (ll / seq_len).exp().cpu().numpy()
+        #         costs = costs.cpu().numpy()
+        #         sequences = sequences.cpu().numpy()
+                
+        #     # --- STRATEGY 2: BEAM SEARCH ---
+        #     elif decode_strategy == 'bs':
+        #         run_width = max(1, width) 
+                
+        #         cum_log_p, sequences, raw_costs, ids, batch_size = model.beam_search(
+        #             nodes, graph, beam_size=run_width,
+        #             compress_mask=opts.compress_mask,
+        #             max_calc_batch_size=opts.max_calc_batch_size,
+        #             cost_matrix=cost_matrix
+        #         )
+                
+        #         seq_len = nodes.size(1) 
+        #         confidence = (cum_log_p / seq_len).exp().cpu().numpy()
+
+        #         if sequences is None:
+        #             costs = [math.inf] * batch_size
+        #             confidence = [0] * batch_size
+        #         else:
+        #             sequences, _ = get_best(
+        #                 sequences.cpu().numpy(), raw_costs.cpu().numpy(),
+        #                 ids.cpu().numpy() if ids is not None else None,
+        #                 batch_size
+        #             )
+                    
+        #             seq_tensor = torch.tensor(np.array(sequences), device=device)
+        #             true_costs, _ = model.problem.get_costs(nodes, seq_tensor)
+        #             costs = true_costs.cpu().numpy()
+
+        # # >> STOP TIMER: Only standard network inference is captured! <<
+        # duration = time.time() - start
+
         # ==========================================================
         # 1. PURE INFERENCE (TIMED)
         # ==========================================================
+        # Sincronizar antes de iniciar el cronómetro si usas GPU
+        if device.type == 'cuda':
+            torch.cuda.synchronize(device)
+            
         start = time.time()
+        
         with torch.no_grad():
             
             # --- STRATEGY 1: GREEDY ---
@@ -155,7 +243,7 @@ def eval_dataset(model, dataset, lkh_costs, decode_strategy, width, softmax_temp
             elif decode_strategy == 'bs':
                 run_width = max(1, width) 
                 
-                cum_log_p, sequences, raw_costs, ids, batch_size = model.beam_search(
+                cum_log_p, sequences, raw_costs, ids, batch_size_bs = model.beam_search(
                     nodes, graph, beam_size=run_width,
                     compress_mask=opts.compress_mask,
                     max_calc_batch_size=opts.max_calc_batch_size,
@@ -166,21 +254,29 @@ def eval_dataset(model, dataset, lkh_costs, decode_strategy, width, softmax_temp
                 confidence = (cum_log_p / seq_len).exp().cpu().numpy()
 
                 if sequences is None:
-                    costs = [math.inf] * batch_size
-                    confidence = [0] * batch_size
+                    costs = [math.inf] * batch_size_bs
+                    confidence = [0] * batch_size_bs
                 else:
                     sequences, _ = get_best(
                         sequences.cpu().numpy(), raw_costs.cpu().numpy(),
                         ids.cpu().numpy() if ids is not None else None,
-                        batch_size
+                        batch_size_bs
                     )
                     
                     seq_tensor = torch.tensor(np.array(sequences), device=device)
                     true_costs, _ = model.problem.get_costs(nodes, seq_tensor)
                     costs = true_costs.cpu().numpy()
 
-        # >> STOP TIMER: Only standard network inference is captured! <<
-        duration = time.time() - start
+        # >> Sincronizar DE NUEVO antes de parar el cronómetro <<
+        if device.type == 'cuda':
+            torch.cuda.synchronize(device)
+            
+        # Este es el tiempo del batch completo
+        batch_duration = time.time() - start 
+        
+        # Calcular el tiempo real por instancia
+        actual_batch_size = len(costs)
+        time_per_inst = batch_duration / actual_batch_size
 
 
         # ==========================================================
@@ -216,17 +312,24 @@ def eval_dataset(model, dataset, lkh_costs, decode_strategy, width, softmax_temp
 
         # Format results per instance
         for i, cost in enumerate(costs):
-            results.append((cost, duration, confidence[i] if isinstance(confidence, (list, np.ndarray)) else 0))
+            # Guardamos el tiempo por instancia real
+            results.append((cost, time_per_inst, confidence[i] if isinstance(confidence, (list, np.ndarray)) else 0))
 
     # --- AGGREGATE RESULTS ---
-    costs, durations, confs = zip(*results)
+    costs, inst_durations, confs = zip(*results)
     costs = np.array(costs)
-    durations = np.array(durations)
+    inst_durations = np.array(inst_durations)
     confs = np.array(confs)
     
     avg_cost = costs.mean()
-    avg_time = durations.sum() / len(costs) 
     avg_conf = confs.mean()
+
+    # Cálculo preciso de tiempos:
+    total_eval_time = inst_durations.sum()  # Tiempo total invirtiendo en todo el dataset
+    num_batches = len(dataloader)           # Cantidad de lotes procesados
+    
+    avg_time_per_inst = total_eval_time / len(costs) # Tiempo medio por instancia
+    avg_time_per_batch = total_eval_time / num_batches # Tiempo medio por lote completo
 
     gap_mean_of_ratios = 0.0
     gap_std_of_ratios = 0.0
@@ -244,7 +347,8 @@ def eval_dataset(model, dataset, lkh_costs, decode_strategy, width, softmax_temp
     avg_variance = sum(batch_variances) / len(batch_variances) if batch_variances else 0.0
     avg_energy = sum(batch_energies) / len(batch_energies) if batch_energies else 0.0 
 
-    return avg_cost, gap_mean_of_ratios, gap_std_of_ratios, gap_ratio_of_means, avg_time, avg_conf, avg_variance, avg_energy
+    # IMPORTANTE: Ahora devolvemos avg_time_per_batch y avg_time_per_inst
+    return avg_cost, gap_mean_of_ratios, gap_std_of_ratios, gap_ratio_of_means, avg_time_per_batch, avg_time_per_inst, avg_conf, avg_variance, avg_energy
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -287,12 +391,15 @@ if __name__ == "__main__":
     with open(opts.csv_out, mode='w' if not file_exists else 'a', newline='') as f:
         writer = csv.writer(f)
         if not file_exists:
-            writer.writerow(['Model_Name', 'Strategy', 'Width', 'Avg_Cost', 'Gap_MoR', 'Gap_STDoR', 'Gap_RoM', 'Time_Per_Inst', 'Avg_Confidence','Avg_Embedding_Variance', 'Avg_Dirichlet_Energy'])
+            # Añadimos Time_Per_Batch y Time_Per_Inst
+            writer.writerow(['Model_Name', 'Strategy', 'Width', 'Avg_Cost', 'Gap_MoR', 'Gap_STDoR', 'Gap_RoM', 'Time_Per_Batch', 'Time_Per_Inst', 'Avg_Confidence','Avg_Embedding_Variance', 'Avg_Dirichlet_Energy'])
     
     if lkh_times is not None:
         with open(opts.csv_out, mode='a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['LKH_Baseline', 'opt', 0, f"{lkh_cost_avg:.4f}", f"0.0000", f"0.0000", "0.0000", f"{lkh_time_avg:.4f}", "1.0000", "0.0000", "0.0000"])
+            # Como LKH procesa instancia a instancia, el "Time_Per_Batch" se simula multiplicando por el batch_size configurado para poder comparar.
+            lkh_simulated_batch_time = lkh_time_avg * opts.batch_size
+            writer.writerow(['LKH_Baseline', 'opt', 0, f"{lkh_cost_avg:.4f}", f"0.0000", f"0.0000", "0.0000", f"{lkh_simulated_batch_time:.4f}", f"{lkh_time_avg:.4f}", "1.0000", "0.0000", "0.0000"])
 
     # --- MAIN LOOP ---
     for model_path in opts.models:
@@ -332,14 +439,16 @@ if __name__ == "__main__":
             
             print(f"  -> Running {strategy.upper()} width={width}...")
             
-            cost, gap_mor, std_mor, gap_rom, duration, conf, variance, energy = eval_dataset(
+            # ¡Desempaquetamos nuestras 9 variables correctamente!
+            cost, gap_mor, std_mor, gap_rom, time_batch, time_inst, conf, variance, energy = eval_dataset(
                 model, dataset, lkh_costs, strategy, width, 1.0, opts, device
             )
             
             with open(opts.csv_out, mode='a', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow([model_name, strategy, width, f"{cost:.4f}", f"{gap_mor:.4f}", f"{std_mor:.4f}", f"{gap_rom:.4f}", f"{duration:.4f}", f"{conf:.4f}", f"{variance:.4f}", f"{energy:.4f}"])            
+                writer.writerow([model_name, strategy, width, f"{cost:.4f}", f"{gap_mor:.4f}", f"{std_mor:.4f}", f"{gap_rom:.4f}", f"{time_batch:.4f}", f"{time_inst:.4f}", f"{conf:.4f}", f"{variance:.4f}", f"{energy:.4f}"])            
             
-            print(f"     Gap (MoR): {gap_mor:.2f}% | Gap (RoM): {gap_rom:.2f}% | Time: {duration:.4f}s | Var: {variance:.4f} | Dir. Energy: {energy:.4f}")
+            # Print para consola actualizado
+            print(f"     Gap (MoR): {gap_mor:.2f}% | Time/Batch: {time_batch:.4f}s | Time/Inst: {time_inst:.4f}s | Var: {variance:.4f}")
 
     print(f"\nResults saved to {opts.csv_out}")

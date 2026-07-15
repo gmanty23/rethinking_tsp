@@ -166,6 +166,14 @@ for GRAPH_SIZE in "${GRAPH_SIZES[@]}"; do
                                 # 2. Parse Feature Configuration
                                 EMB_TYPE="${ABLATION%%:*}"
                                 FEAT_TYPE="${ABLATION##*:}"
+                            for N_LAY in "${N_LAYERS[@]}"; do
+                                # 1. Parse Encoder Configuration
+                                ENC_TYPE="${ENC_CONF%%:*}"
+                                ENC_MODE="${ENC_CONF##*:}"
+                                
+                                # 2. Parse Feature Configuration
+                                EMB_TYPE="${ABLATION%%:*}"
+                                FEAT_TYPE="${ABLATION##*:}"
 
                                 # ==========================================
                                 # SANITY CHECKS: PREVENT REDUNDANT/CRASHING RUNS
@@ -187,6 +195,19 @@ for GRAPH_SIZE in "${GRAPH_SIZES[@]}"; do
                                     fi
                                 fi
 
+                                # Check 4: GNN Deep is identical to GNN Standard if Encoder doesn't get NAB
+                                if [ "$ENC_TYPE" == "gnn" ] && [ "$ENC_MODE" == "deep" ]; then
+                                    if [ "$NAB_MODE" == "none" ] || [ "$NAB_MODE" == "decoder" ]; then
+                                        echo "    [Skip] GNN:Deep is identical to GNN:Standard in this mode. Skipping $ENC_CONF with nab_mode=$NAB_MODE." | tee -a "$LOG_FILE"
+                                        continue
+                                    fi
+                                fi
+                                
+                                # # Check 5: NUEVO - Evitar ejecuciones redundantes de direccion para No-GNNs
+                                # # Si el modelo NO es una GNN, solo lo corremos cuando DIR es "forward" (para evitar correrlo 3 veces)
+                                # if [ "$ENC_TYPE" != "gnn" ] && [ "$DIR" != "forward" ]; then
+                                #     continue
+                                # fi
                                 # Check 4: GNN Deep is identical to GNN Standard if Encoder doesn't get NAB
                                 if [ "$ENC_TYPE" == "gnn" ] && [ "$ENC_MODE" == "deep" ]; then
                                     if [ "$NAB_MODE" == "none" ] || [ "$NAB_MODE" == "decoder" ]; then
