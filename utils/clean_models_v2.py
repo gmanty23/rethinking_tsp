@@ -73,7 +73,7 @@ def clean_model_folder(folder_path, keep_numbers, recursive=False):
 
 # --- CONFIGURATION ---
 TARGET_FOLDER = "outputs/FINAL_PAPER/V3-TSP_SIZES_ablation/windy_tsp_50-50/NAB-CLIPPED-V3_TSP_SIZES_mlp-standard_original_hybrid_nab-none_tsp50_ent0.05_neighbors100_strat-cost_weighted_percentage_dir-dual_layers-3_emb-original_feat-hybrid_20260712T205758" 
-MODELS_TO_KEEP = [0, 24, 49, 74, 94, 99] # The script will look for epoch-99.pt, etc.
+MODELS_TO_KEEP = [0, 24, 49, 74, 94, 99, 9] # The script will look for epoch-99.pt, etc.
 SEARCH_SUBFOLDERS = False # Set to True to clean all nested folders, False for just the root folder
 
 if __name__ == "__main__":
