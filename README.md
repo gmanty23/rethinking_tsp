@@ -1,103 +1,278 @@
-# :briefcase: Learning TSP Requires Rethinking Generalization
+# Windy TSP: Asymmetric Neural Combinatorial Optimization
 
-This repository contains code for the paper [**"Learning TSP Requires Rethinking Generalization"**](https://arxiv.org/abs/2006.07054) by Chaitanya K. Joshi, Quentin Cappart, Louis-Martin Rousseau, Thomas Laurent, accepted to the **27th International Conference on Principles and Practice of Constraint Programming** (CP 2021).
+This repository provides a deep Reinforcement Learning (RL) framework designed to solve the **Windy Traveling Salesman Problem (Windy TSP)**—a variant of the **Asymmetric TSP (ATSP)** where travel costs are heavily influenced by directional wind vectors.
 
-## Overview
+By extending the standard Transformer and Graph Neural Network paradigms, this project introduces architectures capable of natively understanding non-Euclidean, directed graphs without suffering from catastrophic FP16 overflow or gradient collapse.
 
-- End-to-end training of neural network solvers for combinatorial problems such as the **Travelling Salesman Problem** is intractable and inefficient beyond a few hundreds of nodes. 
-While state-of-the-art Machine Learning approaches perform closely to classical solvers for trivially small sizes, they are **unable to generalize** the learnt policy to larger instances of practical scales.
-- Towards leveraging transfer learning to **solve large-scale TSPs**, this paper identifies inductive biases, model architectures and learning algorithms that promote generalization to instances larger than those seen in training. 
-Our controlled experiments provide the first principled investigation into such **zero-shot generalization**, revealing that extrapolating beyond training data requires rethinking the entire neural combinatorial optimization pipeline, from network layers and learning paradigms to evaluation protocols.
+---
 
-## End-to-end Neural Combinatorial Optimization Pipeline
+# Acknowledgments & Credits
 
-Towards a controlled study of **neural combinatorial optimization**, we unify several state-of-the-art architectures and learning paradigms into one experimental pipeline and provide the first principled investigation on zero-shot generalization to large instances.
+This project is an advanced fork and extension of the excellent **learning-tsp** repository by **chaitjo**, which itself implements:
 
-![End-to-end neural combinatorial optimization pipeline](/img/pipeline.png)
+- The foundational **Attention Model** by **Kool et al. (2019)**
+- The **GCN framework** by **Bresson et al. (2018)**
 
-1. **Problem Definition:** The combinatorial problem is formulated via a graph.
-2. **Graph Embedding:** Embeddings for each graph node areobtained using a Graph Neural Network encoder.
-3. **Solution Decoding:** Probabilities are assigned to each node for belonging to the solution set, either independent of one-another (i.e. Non-autoregressive decoding) or conditionally through graph traversal (i.e. Autoregressive decoding).
-4. **Solution Search:** The predicted probabilities are converted intodiscrete decisions through classical graph search techniques such as greedy search or beam search.
-5. **Policy Learning:** The entire model in trained end-to-end via imitating anoptimal solver (i.e. supervised learning) or through minimizing a cost function (i.e. reinforcement learning).
+## Key Architectural Contributions in this Fork
 
-**We open-source our framework and datasets to encourage the community to go beyond evaluating performance on fixed TSP sizes, develop more expressive and scale-invariant GNNs, as well as study transfer learning for combinatorial problems.**
+- **Asymmetric Node Embeddings (ANE)**
+  - A multi-modal *Fat Vector* packing:
+    - Spatial coordinates
+    - Physical wind vectors
+    - Local topology
+    - Global cost statistics
+  - Safely compressed via log-scaling.
 
-## Installation
-We ran our code on Ubuntu 16.04, using Python 3.6.7, PyTorch 1.2.0 and CUDA 10.0. 
-We highly recommend installation via Anaconda.
+- **Neural Adaptive Bias (NAB)**
+  - A trainable module that explicitly projects asymmetric cost matrices directly into the logit space of Attention mechanisms and GNN gating layers.
 
-```sh
-# Clone the repository. 
-git clone https://github.com/chaitjo/learning-tsp.git
-cd learning-tsp
+- **Adaptation Attention-Free Module (AAFM)**
+  - A novel, numerically stable (FP16-safe) routing module that replaces multi-head attention with explicit LogSumExp NAB integration.
 
-# Set up a new conda environment and activate it.
-conda create -n tsp python=3.6.7
-source activate tsp
+- **Directional GNNs**
+  - Upgraded Graph Convolutional layers supporting:
+    - Forward message passing
+    - Backward message passing
+    - Dual (bi-directional fusion) message passing
+  - Designed to prevent over-smoothing on directed edges.
 
-# Install all dependencies and Jupyter Lab (for using notebooks).
-conda install pytorch=1.2.0 cudatoolkit=10.0 -c pytorch  
-conda install numpy scipy cython tqdm scikit-learn matplotlib seaborn tensorboard pandas
-conda install jupyterlab -c conda-forge
-pip install tensorboard_logger
+- **Physics-Aware Environments**
+  - Custom continuous data generators
+  - Robust reachability sparsification (kNN with minimum in-degrees)
+  - Decoupled RL reward / feature scaling pipelines
 
-# Download datasets and unpack to the /data/tsp directory.
-pip install gdown
-gdown https://drive.google.com/uc?id=152mpCze-v4d0m9kdsCeVkLdHFkjeDeF5
-tar -xvzf tsp-data.tar.gz ./data/tsp/
+---
+
+# ⚙️ Installation & Setup
+
+## 1. Python Environment
+
+You can install the dependencies locally or use the provided Docker setup.
+
+### Local Installation
+
+```bash
+git clone https://github.com/YOUR_USERNAME/windy_tsp.git
+cd windy_tsp
+
+pip install -r requirements.txt
 ```
 
+### Docker Installation
 
-## Usage
+```bash
+docker build -t windy-tsp .
 
-For reproducing experiments, we provide a set of scripts for training, finetuning and evaluation in the `/scripts` directory. 
-Pre-trained models for some experiments described in the paper can be found in the `/pretrained` directory.
-
-Refer to `options.py` for descriptions of each option. 
-High-level commands are as follows:
-```sh
-# Training
-CUDA_VISIBLE_DEVICES=<available-gpu-ids> python run.py 
-    --problem <tsp/tspsl> 
-    --model <attention/nar> 
-    --encoder <gnn/gat/mlp> 
-    --baseline <rollout/critic> 
-    --min_size <20/50/100> 
-    --max_size <50/100/200>
-    --batch_size 128 
-    --train_dataset data/tsp/tsp<20/50/100/20-50>_train_concorde.txt 
-    --val_datasets data/tsp/tsp20_val_concorde.txt data/tsp/tsp50_val_concorde.txt data/tsp/tsp100_val_concorde.txt
-    --lr_model 1e-4
-    --run_name <custom_run_name>
-    
-# Evaluation
-CUDA_VISIBLE_DEVICES=<available-gpu-ids> python eval.py data/tsp/tsp10-200_concorde.txt
-    --model outputs/<custom_run_name>_<datetime>/
-    --decode_strategy <greedy/sample/bs> 
-    --eval_batch_size <128/1/16>
-    --width <1/128/1280>
+docker run --gpus all -it \
+    -v $(pwd):/workspace \
+    windy-tsp
 ```
 
-## Citation and Resources
-**Citation:**
-```
-@inproceedings{joshi2021learning,
-  title={Learning TSP Requires Rethinking Generalization},
-  author={Joshi, Chaitanya K and Cappart, Quentin and Rousseau, Louis-Martin and Laurent, Thomas},
-  booktitle={International Conference on Principles and Practice of Constraint Programming},
-  year={2021}
-}
+---
+
+## 2. Setting up the Optimal Baseline Solver (LKH-3)
+
+This repository uses **LKH-3** to generate exact (or highly optimized) ground-truth tours for the Asymmetric TSP.
+
+Because LKH-3 is compiled from C source, it must be downloaded and built locally (it is intentionally excluded from version control).
+
+```bash
+# Download and extract LKH-3 into the repository root
+
+wget http://akira.ruc.dk/~keld/research/LKH-3/LKH-3.0.6.tgz
+
+tar xvfz LKH-3.0.6.tgz
+
+cd LKH-3.0.6
+
+# Compile the binary
+make
+
+cd ..
 ```
 
-**Resources:**
-- [ArXiv paper](https://arxiv.org/abs/2006.07054)
-- [Blog post on neural combinatorial optimization](http://chaitjo.github.io/neural-combinatorial-optimization/)
-- [TSP datasets generated with Concorde](https://drive.google.com/uc?id=152mpCze-v4d0m9kdsCeVkLdHFkjeDeF5)
+> **Note:** `eval_baseline.py` automatically locates the compiled LKH executable.
 
-**Acknowledgement and Related Work:** Our codebase is a modified clone of [Wouter Kool's excellent repository](https://github.com/wouterkool/attention-learn-to-route) for the paper ["Attention, Learn to Solve Routing Problems!"](https://openreview.net/forum?id=ByxBFsRqYm), and incorporates ideas from the following papers, among others:
-- [W. Kool, H. van Hoof, and M. Welling. Attention, learn to solve routing problems! In International Conference on Learning Representations, 2019.](https://openreview.net/forum?id=ByxBFsRqYm)
-- [M. Deudon, P. Cournut, A. Lacoste, Y. Adulyasak, and L.-M. Rousseau. Learning heuristics for the tsp by policy gradient. In International Conference on the Integration of Constraint Programming, Artificial Intelligence, and Operations Research, pages 170–181. Springer, 2018.](https://link.springer.com/chapter/10.1007/978-3-319-93031-2_12)
-- [C. K. Joshi, T. Laurent, and X. Bresson. An efficient graph convolutional network technique for the travelling salesman problem. arXiv preprint arXiv:1906.01227, 2019.](https://arxiv.org/abs/1906.01227)
-- [A. Nowak, S. Villar, A. S. Bandeira, and J. Bruna. A note on learning algorithms for quadratic assignment with graph neural networks. arXiv preprint arXiv:1706.07450, 2017.](https://arxiv.org/abs/1706.07450v1)
-- [I. Bello, H. Pham, Q. V. Le, M. Norouzi, and S. Bengio. Neural combinatorial optimization with reinforcement learning. In International Conference on Learning Representations, 2017.](https://arxiv.org/abs/1611.09940)
+---
+
+# 🚀 Running the Code
+
+To streamline large-scale experimentation, this repository includes heavily automated Bash scripts that handle everything from data generation to parallel GPU round-robin execution.
+
+---
+
+## 1. Training (Ablation Studies)
+
+Launch a large grid search of architectures (encoders, NAB configurations, GNN directions):
+
+```bash
+bash train_ablations.sh
+```
+
+### What it does
+
+- Automatically generates validation `.pkl` datasets
+- Computes the optimal LKH-3 baseline
+- Launches background Python jobs
+- Uses strict concurrency controls (`MAX_PARALLEL_JOBS`)
+- Automatically assigns GPUs
+
+### Monitoring
+Track the master log via the tail -f shown in the terminal
+
+---
+
+## 2. Smart Continuation
+
+If training is interrupted or you want to continue training to a higher epoch count (e.g. 100 → 200 epochs), update `TARGET_TOTAL_EPOCHS` inside `resume_ablations.sh` and run:
+
+```bash
+bash resume_ablations.sh
+```
+
+### What it does
+
+- Parses existing output directories
+- Finds the highest `.pt` checkpoint for every valid configuration
+- Seamlessly resumes training
+- Preserves existing logs
+
+---
+
+## 3. Neural Network Evaluation
+
+Evaluate all trained checkpoints inside an output directory:
+
+```bash
+bash eval_ablations.sh
+```
+
+### What it does
+
+- Loads every trained model
+- Runs Greedy decoding
+- Runs Beam Search decoding
+- Computes optimality gaps against LKH-3
+- Measures latent-space metrics such as:
+  - GNN Dirichlet Energy
+  - Over-smoothing indicators
+- Aggregates results into a single CSV
+
+---
+
+# 📊 Traditional Heuristics & Diagnostics
+
+## Operations Research Baselines
+
+Standard OR heuristics are evaluated using **pyCombinatorial**, including:
+
+- Nearest Insertion
+- Tabu Search
+- Genetic Algorithms
+- Other classical heuristics
+
+```bash
+python eval_heuristics.py \
+    --method all \
+    --dataset_path data/windy_tsp/windy_tsp50_val.pkl
+```
+
+> **Note:** Ensure LKH-3 has been compiled first, since this script compares heuristic performance against LKH ground-truth solutions.
+
+---
+
+## Visual Diagnostics
+
+To visually verify that the model respects asymmetric edge masking and correctly models wind physics:
+
+```bash
+python plot_diagnostic.py
+```
+
+The script performs inference on a single graph and generates:
+
+```
+diagnostic_tour.png
+```
+
+The visualization includes:
+
+- Legal traversals
+- Graph-mask violations
+- Global wind vector overlay
+
+---
+
+# 📁 Repository Structure
+
+```text
+nets/
+├── encoders/
+│   ├── aafm_encoder.py
+│   ├── edge_gat_encoder.py
+│   ├── gnn_encoder.py
+│   └── ...
+
+├── attention_model.py
+└── critic_network.py
+
+problems/
+└── tsp/
+    ├── problem_tsp.py
+    └── ...
+
+data/
+└── windy_tsp/
+    └── generate_windy_tsp.py
+
+utils/
+```
+
+## Main Components
+
+### `nets/`
+
+Core neural architectures.
+
+- `encoders/`
+  - `aafm_encoder.py`
+  - `edge_gat_encoder.py`
+  - `gnn_encoder.py`
+  - Additional encoder implementations
+
+- `attention_model.py`
+  - Primary autoregressive actor model
+
+- `critic_network.py`
+  - Value estimator baseline (standard TSP only)
+
+### `problems/tsp/`
+
+Environment definitions.
+
+- `problem_tsp.py`
+  - WindyTSP environment
+  - Custom kNN masking
+  - Feature/reward scaling split
+
+### `data/windy_tsp/`
+
+Dataset generation.
+
+- `generate_windy_tsp.py`
+  - Generates `.pkl` datasets
+  - Validates asymmetric physics through strict assertions:
+
+```math
+C_{ij} \neq C_{ji}
+```
+
+### `utils/`
+
+Utility scripts for:
+
+- Logging
+- Beam search
+- Checkpoint management
+
+---
