@@ -1,3 +1,23 @@
+"""
+eval_baseline.py
+
+Asymmetric LKH-3 Baseline Integration.
+
+This script executes exact/heuristic baseline solvers to generate Ground Truth 
+tours for comparison against the Neural Network.
+
+BASE IMPLEMENTATION:
+- Standard symmetric solvers (Concorde, Gurobi, Insertion, Nearest Neighbor).
+
+CONTRIBUTIONS (Windy/Asymmetric TSP Extensions):
+- Added the `lkh_windy` method. This uses the LKH-3 solver, which natively supports 
+  Asymmetric TSP (ATSP). 
+- Implemented `write_atsp_tsplib` to explicitly calculate the asymmetric wind 
+  physics and format the matrix for the LKH binary.
+- Bypassed symmetric Ground Truth checks for Windy datasets, as this script IS 
+  the Ground Truth generator.
+"""
+
 import argparse
 import numpy as np
 import os
@@ -164,6 +184,10 @@ def write_tsplib(filename, loc, name="problem"):
         f.write("EOF\n")
 
 # Write Assymetric TSP for LKH
+# LKH-3 requires an explicit distance matrix for Asymmetric TSP. 
+# Crucially, LKH-3 strictly requires INTEGER values. Since our wind costs 
+# are continuous floats, we scale them by 100,000 to preserve precision 
+# before casting to integers.
 def write_atsp_tsplib(filename, cost_matrix, name="problem"):
     n = cost_matrix.shape[0]
     # LKH requires integers. Scale floats by 100,000 to keep precision.
@@ -507,7 +531,8 @@ if __name__ == "__main__":
             if not os.path.isdir(target_dir): os.makedirs(target_dir)
 
             # Load Raw Windy Dataset (Pickle)
-            # We bypass TSP.make_dataset because Windy data structure is different (dict/tuple)
+            # We bypass TSP.make_dataset because Windy data structure is different 
+            # (it is a dict containing 'loc', 'wind', 'alpha' rather than just coords).
             windy_data = load_dataset(dataset_path)
             
             # Slice dataset

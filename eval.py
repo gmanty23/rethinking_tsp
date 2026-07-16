@@ -1,5 +1,22 @@
 #!/usr/bin/env python
 
+"""
+eval.py
+
+Standard Evaluation Script.
+
+BASE IMPLEMENTATION ONLY:
+- This file is preserved from the original "Rethinking Generalization" framework.
+- It is designed to evaluate standard, symmetric Euclidean TSP models.
+
+ON ASYMMETRY / WINDY TSP:
+- CRITICAL WARNING: This script does NOT support evaluating Windy TSP models. 
+  It does not load or pass the 'cost_matrix' to the model's forward pass, 
+  which will cause Asymmetric Node Embeddings (ANE) and Neural Adaptive Biases 
+  (NAB) to crash.
+- To evaluate Windy TSP models, you MUST use the custom `eval_expRIVAL.py` script.
+"""
+
 import math
 import os
 import time

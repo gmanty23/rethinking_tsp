@@ -1,5 +1,19 @@
 #!/usr/bin/env python
 
+"""
+eval_expRIVAL.py
+
+UPDATE: The whole file
+
+CONTRIBUTION: Comprehensive Latent & Inference Evaluation Pipeline.
+
+This script extends the standard NCO evaluation by capturing deep latent metrics:
+1. Dirichlet Energy & Embedding Variance (to measure GNN over-smoothing).
+2. Model Confidence (Average Log-Probability).
+3. Exact CUDA-synchronized inference latency benchmarking.
+4. Automatic fallback/generation of Asymmetric LKH baselines.
+"""
+
 import math
 import os
 import time
@@ -20,10 +34,10 @@ from nets.nar_model import NARModel
 
 def compute_embedding_variance(embeddings):
     """
-    Calcula la varianza espacial promedio de los embeddings de los nodos
-    para medir el over-smoothing en el GNN.
+    Calculates the average spatial variance of the node embeddings to measure 
+    feature collapse (over-smoothing) inside the GNN layers.
     Args:
-        embeddings: Tensor de dimensiones (batch_size, num_nodes, embedding_dim)
+        embeddings: Tensor of shape (batch_size, num_nodes, embedding_dim)
     """
     node_variance = torch.var(embeddings, dim=1, unbiased=False) 
     mean_variance_per_graph = node_variance.mean(dim=-1) 
@@ -31,29 +45,30 @@ def compute_embedding_variance(embeddings):
 
 def compute_dirichlet_energy(embeddings, graph=None):
     """
-    Calcula la Energía de Dirichlet promedio del batch.
-    A prueba de fallos: Si 'graph' está vacío o es inválido, asume Fully Connected.
+    Calculates the average Dirichlet Energy of the batch to measure how 
+    distinguishable connected nodes are from one another.
+    Failsafe: If 'graph' is empty or invalid, assumes a Fully Connected graph.
     """
     B, N, D = embeddings.shape
-    # Distancias cuadradas entre todos los pares: ||h_i - h_j||^2 -> (B, N, N)
+    # Squared distances between all pairs: ||h_i - h_j||^2 -> (B, N, N)
     sq_dists = torch.cdist(embeddings, embeddings, p=2).pow(2)
     
-    # Máscara por defecto: Fully Connected (todos con todos, excluyendo la diagonal)
+    # Default Mask: Fully Connected (all-to-all, excluding the diagonal)
     mask = torch.ones(B, N, N, device=embeddings.device) - torch.eye(N, device=embeddings.device).unsqueeze(0)
     
-    # Si recibimos un grafo, vamos a limpiarlo y verificar si tiene aristas reales
+    # If we receive a graph, clean it and verify it has valid edges
     if graph is not None and isinstance(graph, torch.Tensor) and graph.dim() == 3 and graph.shape[1] == N:
-        # 1. Binarizar por si el tensor contiene costes/pesos en lugar de adyacencia
+        # 1. Binarize in case the tensor contains continuous costs/weights
         binary_graph = (graph == 0).float()
         
-        # 2. Eliminar las conexiones del nodo consigo mismo (self-loops)
+        # 2. Remove self-loops
         binary_graph = binary_graph * mask
         
-        # 3. Solo usamos este grafo si realmente tiene aristas definidas
+        # 3. Only use this graph if it actually contains defined edges
         if binary_graph.sum() > 0:
             mask = binary_graph
 
-    # Calcular la energía promedio sobre las aristas válidas de la máscara
+    # Calculate the average energy over the valid edges of the mask
     energy_per_graph = (sq_dists * mask).sum(dim=(1, 2)) / (mask.sum(dim=(1, 2)) + 1e-9)
         
     return energy_per_graph.mean()
@@ -124,14 +139,14 @@ def eval_dataset(model, dataset, lkh_costs, decode_strategy, width, softmax_temp
     dataloader = DataLoader(dataset, batch_size=opts.batch_size, shuffle=False, num_workers=opts.num_workers)
 
     # ==========================================================
-    # 0. GPU WARM-UP (CALENTAMIENTO)
+    # 0. GPU WARM-UP (PREVENT COLD-START TIMING INACCURACIES)
     # ==========================================================
-    # Tomamos el primer batch del dataloader solo para calentar
+    # Grab the first batch strictly to warm up the hardware
     warmup_batch = next(iter(dataloader))
     w_nodes, w_graph = move_to(warmup_batch['nodes'], device), move_to(warmup_batch['graph'], device)
     w_cost_matrix = move_to(warmup_batch['cost_matrix'], device) if 'cost_matrix' in warmup_batch else None
 
-    # Hacemos 3 pasadas de mentira para que CUDA asigne memoria y compile kernels
+    # Perform 3 dummy forward passes to force CUDA to allocate memory and compile kernels
     with torch.no_grad():
         for _ in range(3):
             if decode_strategy == 'greedy':
@@ -150,7 +165,7 @@ def eval_dataset(model, dataset, lkh_costs, decode_strategy, width, softmax_temp
                     cost_matrix=w_cost_matrix
                 )
                 
-    # Sincronizamos para asegurar que todo el trabajo basura ha terminado
+    # Synchronize to ensure all garbage work is fully completed before starting the timer
     if device.type == 'cuda':
         torch.cuda.synchronize(device)
     # ==========================================================
@@ -217,7 +232,7 @@ def eval_dataset(model, dataset, lkh_costs, decode_strategy, width, softmax_temp
         # ==========================================================
         # 1. PURE INFERENCE (TIMED)
         # ==========================================================
-        # Sincronizar antes de iniciar el cronómetro si usas GPU
+        # Synchronize before starting the clock for accurate GPU timing
         if device.type == 'cuda':
             torch.cuda.synchronize(device)
             
@@ -267,14 +282,14 @@ def eval_dataset(model, dataset, lkh_costs, decode_strategy, width, softmax_temp
                     true_costs, _ = model.problem.get_costs(nodes, seq_tensor)
                     costs = true_costs.cpu().numpy()
 
-        # >> Sincronizar DE NUEVO antes de parar el cronómetro <<
+        # >> Synchronize AGAIN before stopping the clock <<
         if device.type == 'cuda':
             torch.cuda.synchronize(device)
             
-        # Este es el tiempo del batch completo
+        # This is the time for the entire batch
         batch_duration = time.time() - start 
         
-        # Calcular el tiempo real por instancia
+        # Calculate true time per instance
         actual_batch_size = len(costs)
         time_per_inst = batch_duration / actual_batch_size
 

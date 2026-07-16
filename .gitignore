@@ -15,6 +15,7 @@ __pycache__/
 *.log
 *.bak
 *.png
+*.svg
 
 
 tsp-data.tar.gz
@@ -22,5 +23,7 @@ tsp-data.tar.gz
 
 LKH-3.0.6
 
-resultados_especificos
-scripts_2
+resultados_especificos/
+scripts_2/
+visualizations/
+z_no_subir/
