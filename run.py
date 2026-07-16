@@ -1,5 +1,14 @@
 #!/usr/bin/env python
 
+"""
+run.py
+
+Primary entry point for training and evaluation execution. 
+This script handles hardware configuration, binds parsed arguments to the model 
+architecture, initializes baselines/optimizers, and manages the state-loading 
+process for fine-tuning or resuming experiments.
+"""
+
 import os
 import json
 import pprint as pp
@@ -33,7 +42,11 @@ warnings.filterwarnings("ignore", message="indexing with dtype torch.uint8 is no
 def run(opts):
     """Top level method to run experiments for SL and RL"""
     
-    # --- ADD THESE 3 LINES FOR RTX 5000/4000/3000 SPEEDUP ---
+    # --- UPDATE: TensorFloat-32 (TF32) ---
+    # Enabling TF32 provides massive throughput improvements on modern Nvidia 
+    # GPUs (Ampere/Ada architectures like RTX 3000/4000/5000) by utilizing Tensor Cores.
+    # The slight reduction in mantissa precision does not negatively impact the 
+    # gradient dynamics of our NCO models.
     torch.set_float32_matmul_precision('high')
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
@@ -86,6 +99,9 @@ def _run_rl(opts):
         # 'pointer': PointerNetwork
     }.get(opts.model, None)
     assert model_class is not None, "Unknown model: {}".format(model_class)
+
+    # --- UPDATE: Flexible Encoder Selection and New Encoders ---
+    # The encoder architecture can be selected via the --encoder argument.
     encoder_class = {
         'gnn': GNNEncoder,
         'gat': GraphAttentionEncoder,
@@ -110,6 +126,10 @@ def _run_rl(opts):
         derived_k = int(opts.neighbors)
 
     assert encoder_class is not None, "Unknown encoder: {}".format(encoder_class)
+
+    # Initialize the main Attention Model. 
+    # This instantiation binds the base architecture (Rethinking Generalization)
+    # with our novel Asymmetric/Windy TSP extensions.
     model = model_class(
         problem=problem,
         embedding_dim=opts.embedding_dim,
@@ -128,6 +148,9 @@ def _run_rl(opts):
         mask_graph=False,
         checkpoint_encoder=opts.checkpoint_encoder,
         shrink_size=opts.shrink_size,
+        # --- UPDATE: Asymmetric / Windy TSP Extensions ---
+        # These parameters dictate how the model processes directional edge weights
+        # and non-euclidean spatial relationships.
         node_feature_type=opts.node_feature_type,
         gnn_direction_mode=opts.gnn_direction_mode,
         node_embedding_type=opts.node_embedding_type,
@@ -209,8 +232,13 @@ def _run_rl(opts):
         try:
             opt_state = load_data['optimizer']
             
-            # --- THE PROACTIVE SHAPE INSPECTOR ---
-            # Manually check the shapes of the saved momentum buffers against the model
+            # --- UPDATE: The proactive shape inspector ---
+            # When fine-tuning a base model by adding new architectural 
+            # components (like Neural Adaptive Bias matrices), the parameter counts change.
+            # Standard PyTorch will crash if Adam's saved exponential moving averages (momentum)
+            # do not match the new parameter shapes. 
+            # This block safely catches shape mismatches, allowing the model to load the 
+            # saved network weights while seamlessly dropping the incompatible momentum buffers.
             if len(optimizer.param_groups) > 0 and len(opt_state['param_groups']) > 0:
                 model_params = optimizer.param_groups[0]['params']
                 saved_param_ids = opt_state['param_groups'][0]['params']

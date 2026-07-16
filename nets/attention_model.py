@@ -1,3 +1,19 @@
+"""
+nets/attention_model.py
+
+Core architecture for the Autoregressive NCO Model.
+
+BASE IMPLEMENTATION:
+- Transformer-based Encoder-Decoder architecture for routing (Kool et al. 2019).
+
+CONTRIBUTIONS (Windy/Asymmetric TSP Extensions):
+1. NABGenerator: Neural Adaptive Bias matrix generation to inject directional 
+   costs (distance, angle, explicit cost) directly into the attention mechanism.
+2. ANE (Asymmetric Node Embeddings): Multi-modal input fusion layers that combine 
+   spatial coordinates, local topological distances, and global graph statistics.
+3. Expanded spatial dimensions to handle explicit wind vectors (Wx, Wy).
+"""
+
 import math
 import numpy as np
 from typing import NamedTuple
@@ -14,46 +30,53 @@ from utils.beam_search import CachedLookup
 from utils.functions import sample_many
 
 class NABGenerator(nn.Module):
-    """Generates the Neural Adaptive Bias (A) matrix from Distance, Angle, and Cost."""
+    #---- UPDATE: Neural Adaptive Bias (NAB) Generator ----#
+    # Generates a dense, asymmetric bias matrix (A) that is injected directly into
+    # the attention logits of the Transformer/GNN layers.
+    #
+    # Instead of relying purely on the network to infer directionality from raw
+    # coordinates, this module explicitly computes physical relationships (Distance,
+    # Angle) and fuses them with the true asymmetric Cost Matrix using a learned
+    # temperature-scaled gating mechanism.
     def __init__(self, embed_dim):
         super(NABGenerator, self).__init__()
         
-        # MLPs for each matrix (Eq 11-13)
+        # Independent MLPs to project raw scalar features into high-dimensional space
         self.W_D = nn.Sequential(nn.Linear(1, embed_dim), nn.ReLU(), nn.Linear(embed_dim, embed_dim))
         self.W_Phi = nn.Sequential(nn.Linear(1, embed_dim), nn.ReLU(), nn.Linear(embed_dim, embed_dim))
         self.W_T = nn.Sequential(nn.Linear(1, embed_dim), nn.ReLU(), nn.Linear(embed_dim, embed_dim))
         
-        # Gating components (Eq 14)
+        # Multi-channel Gating components
         self.W_G = nn.Linear(3 * embed_dim, 3) 
         self.tau = nn.Parameter(torch.tensor(1.0)) # Learnable temperature
         
-        # Final projection to scalar (Eq 16)
+        # Final projection from embedded space back to a scalar bias
         self.w_out = nn.Linear(embed_dim, 1, bias=False)
 
     def forward(self, coords, cost_matrix):
-        # coords: (B, N, 2)
-        # cost_matrix: (B, N, N)
+        # coords: (Batch, Nodes, 2) | cost_matrix: (Batch, Nodes, Nodes)
         
-        # 1. Calculate Distance (D) and Angle (Phi) Matrices
+        # 1. Calculate explicit physical relationships
         diff = coords.unsqueeze(2) - coords.unsqueeze(1) # (B, N, N, 2)
-        # SAFEGUARD: Clamp before sqrt to prevent NaN gradients on self-loops (dist=0)
-        D = (diff ** 2).sum(dim=-1, keepdim=True).clamp(min=1e-12).sqrt() # (B, N, N, 1)
-        Phi = torch.atan2(diff[..., 1], diff[..., 0]).unsqueeze(-1) # (B, N, N, 1)
-        T = cost_matrix.unsqueeze(-1)                    # (B, N, N, 1)
 
-        # 2. Embed each matrix
+        # SAFEGUARD: Clamp before sqrt to prevent NaN gradients on self-loops (dist=0)
+        D = (diff ** 2).sum(dim=-1, keepdim=True).clamp(min=1e-12).sqrt() # Distance (B, N, N, 1)
+        Phi = torch.atan2(diff[..., 1], diff[..., 0]).unsqueeze(-1)       # Angle (B, N, N, 1)
+        T = cost_matrix.unsqueeze(-1)                                     # Cost (B, N, N, 1)
+
+        # 2. Embed each matrix into hidden dimension
         E_D = self.W_D(D)
         E_Phi = self.W_Phi(Phi)
         E_T = self.W_T(T)
 
-        # 3. Multi-channel Gating
+        # 3. Dynamic Gating: Let the network decide which feature is most important per edge
         concat = torch.cat([E_D, E_Phi, E_T], dim=-1)
         gates = F.softmax(self.W_G(concat) / self.tau, dim=-1) # (B, N, N, 3)
 
-        # 4. Fused Representation (Eq 15)
+        # 4. Fused Representation
         H = (gates[..., 0:1] * E_D) + (gates[..., 1:2] * E_Phi) + (gates[..., 2:3] * E_T)
         
-        # 5. Project to Bias Matrix A (Eq 16)
+        # 5. Project back to a scalar Bias Matrix (A)
         A = self.w_out(H).squeeze(-1) # Output shape: (B, N, N)
 
         # ==========================================================
@@ -168,12 +191,12 @@ class AttentionModel(nn.Module):
         self.checkpoint_encoder = checkpoint_encoder
         self.shrink_size = shrink_size
         
-        # Extra logging updates self variables with batch statistics (without returning them)
+        # UPDATE: Extra logging updates self variables with batch statistics (without returning them)
         self.extra_logging = extra_logging
         self.node_feature_type = node_feature_type
         self.gnn_direction_mode = gnn_direction_mode
 
-        # --- RRNCO Ablation Parameters ---
+        # --- UPDATE: RRNCO Ablation Parameters ---
         self.node_embedding_type = kwargs.get('node_embedding_type', 'original')
         self.k_neighbors = kwargs.get('k_neighbors', 20) 
         self.use_wind = kwargs.get('use_wind', False) 
@@ -217,7 +240,8 @@ class AttentionModel(nn.Module):
 
             step_context_dim = 2 * embedding_dim
             
-            # === FEATURE DIMENSION LOGIC ===
+            # ===UPDATE: FEATURE DIMENSION LOGIC ===
+            # We define the node_dim based on the node_feature_type.
             NUM_STATS = 8             # 8 stats: Mean, Std, Min, Max (for both Out and In)
             if self.node_feature_type == 'hybrid':
                 node_dim = self.spatial_dim + NUM_STATS 
@@ -228,23 +252,19 @@ class AttentionModel(nn.Module):
             else:
                 node_dim = 0
 
-            # # === FEATURE DIMENSION LOGIC ===  #AQUI
-            # if self.node_feature_type == 'hybrid':
-            #     node_dim = 4
-            # elif self.node_feature_type == 'learned':
-            #     node_dim = 2
-            # elif self.node_feature_type == 'coords':
-            #     node_dim = 2
-            # else:
-            #     # For 'blank' mode, node_dim is irrelevant for the Linear layer
-            #     node_dim = 0
-
             # Learned input symbols for first action
             self.W_placeholder = nn.Parameter(torch.Tensor(2 * embedding_dim))
             self.W_placeholder.data.uniform_(-1, 1)  # Placeholder should be in range of activations
         
-        # === INPUT EMBEDDING LAYER  (Multi-Modal Feature Fusion)===
-        # --- ANE Branches ---
+        # === UPDATE: INPUT EMBEDDING LAYER  (Multi-Modal Feature Fusion)===
+
+        # ---UPDATE: ANE Branches ---
+        # Standard TSP models only project (X, Y). ANE allows the network to 
+        # digest highly complex node states required for Windy TSP, including:
+        # - Spatial data (Coords + Wind Vectors)
+        # - Topological data (K-Nearest Neighbor distances)
+        # - Global Context (Graph summary statistics)
+        # Uses a gating mechanism to dynamically weight the importance of each feature type.
         ane_models = ['ane_pure', 'ane_hybrid', 'ane_no_gate', 'ane_3way_gate', 'ane_stats_only']
         
         if self.node_embedding_type in ane_models:
@@ -317,7 +337,7 @@ class AttentionModel(nn.Module):
                        (Not compatible with DataParallel as the results
                         may be of different lengths on different GPUs)
         """
-        # Generate NAB Matrix if applicable
+        # UPDATE: Generate NAB Matrix if applicable
         nab_bias = None
         if self.nab_mode in ['encoder', 'decoder', 'both']:
             coords = nodes[..., 0:2] 
@@ -485,9 +505,10 @@ class AttentionModel(nn.Module):
                 1
             )
         
-        # === TSP / Windy TSP ===
+        # === UPDATE: TSP / Windy TSP===
         
         # 1. CENTRALIZED CONTIGUOUS FIX & SANITIZATION
+        # We ensure that the input tensor is contiguous and free of NaN or Inf values before any further processing.
         nodes = nodes.contiguous()
         nodes[torch.isnan(nodes)] = 0.0
         nodes[torch.isinf(nodes)] = 0.0
@@ -551,6 +572,8 @@ class AttentionModel(nn.Module):
                 return h_mixed.view(b, n, -1)
             
         # --- Original ---
+        # No gates, no topology, just the original logic for coords/learned/hybrid/blank
+
         # Handle 'blank' mode first
         if self.node_feature_type == 'blank':
             batch_size, num_nodes, _ = nodes.size()
@@ -573,15 +596,6 @@ class AttentionModel(nn.Module):
         else: # coords
             features = spatial_features
 
-        # # 1. Slice based on feature type (coords/learned/hybrid) AQUI
-        # if nodes.size(-1) == 2:
-        #     features = nodes 
-        # elif self.node_feature_type == 'learned':
-        #     features = nodes[..., 5:7] 
-        # elif self.node_feature_type == 'hybrid':
-        #     features = torch.cat((nodes[..., 0:2], nodes[..., 5:7]), dim=-1)
-        # else: # coords
-        #     features = nodes[..., 0:2]
 
         # 2. Contiguous Fix & Sanitization
         features = features.contiguous()
@@ -874,7 +888,11 @@ class AttentionModel(nn.Module):
         # Batch matrix multiplication to compute compatibilities (n_heads, batch_size, num_steps, graph_size)
         compatibility = torch.matmul(glimpse_Q, glimpse_K.transpose(-2, -1)) / math.sqrt(glimpse_Q.size(-1))
 
-        # === INJECT NAB INTO GLIMPSE ===
+        # === UPDATE: INJECT NAB INTO GLIMPSE ===
+        # Here we structurally alter the attention map by directly adding the 
+        # Neural Adaptive Bias matrix. This forces the attention mechanism to 
+        # prioritize nodes based on physical asymmetric costs (wind/distance) 
+        # rather than just Euclidean spatial proximity.
         if nab_bias is not None:
             # nab_bias is (Batch, Steps, Nodes). Add Head Dimension.
             compatibility = compatibility + nab_bias.unsqueeze(0).unsqueeze(-2)
@@ -900,7 +918,10 @@ class AttentionModel(nn.Module):
         logits = torch.matmul(final_Q, logit_K.transpose(-2, -1)).squeeze(-2) / math.sqrt(final_Q.size(-1))
         
         # From the logits compute the probabilities by masking the graph, clipping, and masking visited
-        # === INJECT NAB INTO LOGITS ===
+        # === UPDATE: INJECT NAB INTO LOGITS ===
+        # Here we structurally alter the logits by directly adding the 
+        # Neural Adaptive Bias matrix. This forces the attention mechanism to 
+        # prioritize nodes based on physical asymmetric costs (wind/distance)
         if nab_bias is not None:
             logits = logits + nab_bias
         if self.mask_logits and self.mask_graph:

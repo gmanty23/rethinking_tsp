@@ -1,3 +1,14 @@
+"""
+nets/encoders/aafm_encoder.py
+
+UPDATE: The whole file 
+
+This file replaces the standard GAT/Transformer encoder with a novel architecture 
+designed specifically for asymmetric routing (Windy TSP). Instead of relying on 
+standard dot-product multi-head attention, it uses the explicitly calculated 
+Neural Adaptive Bias (NAB) matrix as the primary routing mechanism.
+"""
+
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -43,9 +54,11 @@ class AdaptationAttentionFreeModule(nn.Module):
         routing_logits = A_expanded + K_expanded
         
         # 4. Apply Numerically Stable Softmax
-        # Softmax over the 'Nodes_j' dimension (dim=2). 
-        # This elegantly handles the exp(A)*exp(K) / sum(exp(A)*exp(K)) math
-        # via the LogSumExp trick, completely eliminating FP16 overflow.
+        # The original paper requires calculating: exp(A)*exp(K) / sum(exp(A)*exp(K)).
+        # Doing this naively causes massive FP16 overflow (NaNs). 
+        # By adding the logits (A + K) and passing them through PyTorch's native 
+        # F.softmax over dim=2, we leverage the built-in LogSumExp trick. 
+        # This executes the exact same math safely.
         routing_weights = F.softmax(routing_logits, dim=2) 
         
         # 5. Multiply by Values and Aggregate
@@ -88,7 +101,10 @@ class AAFMEncoder(nn.Module):
         
         feed_forward_hidden = hidden_dim * 4
         
-        # Notice we ignore n_heads, because AAFM relies entirely on the (B, N, N) NAB matrix!
+        # --- ARCHITECTURAL SHIFT ---
+        # Notice we ignore 'n_heads' entirely. AAFM does not use multi-head attention.
+        # It relies on the dense, global (Batch, Nodes, Nodes) NAB matrix to route 
+        # features. This eliminates the multi-head computational bottleneck.
         self.layers = nn.ModuleList([
             AAFMLayer(hidden_dim, feed_forward_hidden, norm, learn_norm, track_norm)
             for _ in range(n_layers)

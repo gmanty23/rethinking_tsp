@@ -1,3 +1,17 @@
+"""
+nets/encoders/mlp_encoder.py
+
+Baseline Encoders for NCO.
+
+BASE IMPLEMENTATION:
+- Standard Multi-Layer Perceptron (MLP) baseline (Kool et al. 2019).
+
+CONTRIBUTIONS:
+- Modified the forward signatures to gracefully accept `cost_matrix` and `nab_bias` 
+  to ensure compatibility with the Windy TSP training pipeline.
+- Added `IdentityEncoder` for ablation studies testing pure decoder performance.
+"""
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -67,6 +81,7 @@ class MLPEncoder(nn.Module):
             x: Input node features (B x V x H)
             graph: Ignored in MLP
             cost_matrix: Ignored in MLP, accepted for compatibility
+            nab_bias: Ignored in MLP, accepted for compatibility
         Returns:
             Updated node features (B x V x H)
         """
@@ -79,8 +94,16 @@ class MLPEncoder(nn.Module):
 
 class IdentityEncoder(nn.Module):
     """
-    Dummy encoder that skips deep processing entirely.
-    Passes the linearly projected inputs straight to the decoder.
+    UPDATE 
+
+    Identity (Dummy) Encoder.
+    
+    This encoder skips deep feature processing entirely, passing the linearly 
+    projected node inputs straight to the Decoder. 
+    
+    RATIONALE: Used heavily in ablation studies to isolate the performance of 
+    the Decoder (and its injected NAB biases) without the compounding effects 
+    of deep GNN/Transformer spatial aggregation.
     """
     def __init__(self, *args, **kwargs):
         super(IdentityEncoder, self).__init__()

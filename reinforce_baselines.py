@@ -1,3 +1,20 @@
+"""
+reinforce_baselines.py
+
+Reinforcement Learning Baseline implementations for REINFORCE.
+
+BASE IMPLEMENTATION:
+- Standard baselines from Kool et al. (Exponential, Critic, Rollout, Warmup).
+
+ON ASYMMETRY / WINDY TSP:
+- The `RolloutBaseline` is the primary and recommended baseline for Windy TSP. 
+  It natively supports asymmetric cost tracking because it evaluates the model's 
+  own deterministic greedy decoding via the `train.rollout()` function, which 
+  properly passes the explicit `cost_matrix`.
+- WARNING: The `CriticBaseline` is hardcoded for 2D standard TSP and is NOT 
+  compatible with the 4D/ANE Windy TSP pipeline.
+"""
+
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset

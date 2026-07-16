@@ -9,6 +9,22 @@
 # tours that don't visit every city.  The lazy constraint callback
 # adds new constraints to cut them off.
 
+"""
+problems/tsp/tsp_gurobi.py
+
+Optimal Solver using Gurobi (MIP Formulation).
+
+BASE IMPLEMENTATION ONLY:
+- Provided for benchmarking standard, symmetric Euclidean TSP instances.
+
+ON ASYMMETRY / WINDY TSP:
+- CRITICAL WARNING: This script hardcodes a symmetric Euclidean distance matrix. 
+  It CANNOT solve the Asymmetric/Windy TSP and will return incorrect tours if 
+  fed 4D (X, Y, Wx, Wy) data.
+- To calculate optimality gaps for Windy TSP datasets, you MUST use the provided 
+  Asymmetric LKH-3 baseline evaluation scripts, not this file.
+"""
+
 import argparse
 import numpy as np
 from utils.data_utils import load_dataset, save_dataset

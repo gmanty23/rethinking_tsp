@@ -1,3 +1,20 @@
+"""
+problems/tsp/state_tsp.py
+
+State tracking for Autoregressive Beam Search / Greedy Decoding.
+
+BASE IMPLEMENTATION:
+- Standard state tracker from Kool et al. 2019.
+
+ON ASYMMETRY / WINDY TSP:
+- WARNING: The partial `lengths` tracked internally by this class use the 
+  Euclidean L2 norm. For the Windy TSP, these internal partial lengths will 
+  NOT match the true physical cost. 
+- This is safe for inference, as the final true objective cost is recalculated 
+  from scratch using the exact physics formula in `WindyTSP.get_costs` at the 
+  end of the rollout.
+"""
+
 import torch
 from typing import NamedTuple
 from utils.boolmask import mask_long2bool, mask_long_scatter

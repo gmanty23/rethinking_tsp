@@ -1,3 +1,18 @@
+"""
+nets/encoders/gat_encoder.py
+
+Standard Graph Attention (Transformer) Encoder.
+
+BASE IMPLEMENTATION:
+- Standard Multi-Head Attention blocks (Kool et al. 2019).
+
+CONTRIBUTIONS (Windy/Asymmetric TSP Extensions):
+- Modified the forward passes to accept and inject the Neural Adaptive Bias (NAB) 
+  matrix directly into the attention logits.
+- Added protective self-loop unmasking to prevent Softmax NaNs during 
+  graph-masked attention.
+"""
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -81,6 +96,11 @@ class MultiHeadAttention(nn.Module):
         # Calculate compatibility (n_heads, batch_size, n_query, graph_size)
         compatibility = self.norm_factor * torch.matmul(Q, K.transpose(2, 3))
 
+        # UPDATE: Add NAB bias 
+        # Standard GAT relies purely on node embeddings (Q @ K^T) to determine 
+        # attention. By adding the explicit NAB bias matrix here, we force the 
+        # attention mechanism to natively consider the physical asymmetric costs 
+        # (wind vectors, directional distances) between nodes.
         if nab_bias is not None:
             # nab_bias is (Batch, N, N). We add a dimension for n_heads so it broadcasts properly.
             compatibility = compatibility + nab_bias.unsqueeze(0)
@@ -90,7 +110,11 @@ class MultiHeadAttention(nn.Module):
             # Clone mask to avoid modifying original, cast to bool
             bool_mask = mask.bool().clone()
             
-            # SAFEGUARD: Unmask the diagonal (self-loops) to prevent Softmax NaNs
+            # UPDATE: Self-loop protectionf
+            # If a node is completely masked out from all its neighbors, Softmax 
+            # will receive a row of -inf, resulting in NaN gradients that crash training.
+            # We explicitly unmask the diagonal (self-loops) so every node can at 
+            # least attend to itself.
             idx = torch.arange(bool_mask.size(-1), device=bool_mask.device)
             bool_mask[..., idx, idx] = False 
             
@@ -199,6 +223,9 @@ class GraphAttentionEncoder(nn.Module):
         ])
 
     def forward(self, x, graph, cost_matrix=None, nab_bias=None):
+        # Pass the node features (x) through all attention layers.
+        # The same global NAB matrix is injected into the attention logits 
+        # of EVERY layer, ensuring asymmetric directionality is preserved deeply.
         for layer in self.layers:
             x = layer(x, graph, nab_bias=nab_bias)
         return x

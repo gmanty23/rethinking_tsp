@@ -1,3 +1,20 @@
+"""
+nets/critic_network.py
+
+Critic Network for Actor-Critic Reinforcement Learning baselines.
+
+BASE IMPLEMENTATION ONLY:
+- This file is preserved from the original "Rethinking Generalization" framework.
+- It is used to estimate the baseline cost of a graph for REINFORCE.
+
+ON ASYMMETRY / WINDY TSP:
+- WARNING: This module has a hardcoded 2D input projection (nn.Linear(2, ...)) 
+  and does NOT support the 4D spatial features or Asymmetric Node Embeddings (ANE) 
+  used in the Windy TSP extensions. 
+- For asymmetric routing, it is highly recommended to use the standard rollout 
+  baseline (--baseline rollout) instead of the critic baseline.
+"""
+
 from torch import nn
 
 

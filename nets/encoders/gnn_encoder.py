@@ -1,3 +1,20 @@
+"""
+nets/encoders/gnn_encoder.py
+
+Directional & Bias-Injected GNN Encoder.
+
+BASE IMPLEMENTATION:
+- Standard Gated Graph ConvNet (Bresson et al. 2018).
+
+CONTRIBUTIONS (Windy/Asymmetric TSP Extensions):
+- Added `gnn_direction_mode` to allow the GNN to perform asymmetric aggregation 
+  ('forward' for incoming edges, 'backward' for outgoing, 'dual' for bidirectional fusion).
+- Replaced binary edge embeddings with continuous linear projections to natively 
+  handle explicit Cost Matrices and NAB Biases.
+- Edge gating incorporates the edge costs and directional biases directly into the aggregation mechanism.
+- Implemented `deep_nab` injection to ensure wind biases survive deep into the network.
+"""
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -50,18 +67,9 @@ class GNNLayer(nn.Module):
         # For Dual mode, we need a separate weight matrix for Out-Aggregation ---- CONCATENATION AND LINEAR PROJECTION MODE
         if self.gnn_direction_mode == 'dual':
             self.V_out = nn.Linear(hidden_dim, hidden_dim, bias=True)
-            # NEW: Projection layer to mix concatenated inputs (2 * hidden -> hidden)
+            # UPDATE: Projection layer to mix concatenated inputs (2 * hidden -> hidden)
             self.project_dual = nn.Linear(hidden_dim * 2, hidden_dim, bias=True)
 
-        # # For Dual mode, we need a separate weight matrix for Out-Aggregation  -- GATED FUSION MODE
-        # if self.gnn_direction_mode == 'dual':
-        #     self.V_out = nn.Linear(hidden_dim, hidden_dim, bias=True)
-        #     # NEW: Gating Layer (takes combined input, outputs a score between 0 and 1)
-        #     self.gate_layer = nn.Linear(hidden_dim * 2, hidden_dim, bias=True)
-
-        # # For original simple sum version (no gating), 
-        # if self.gnn_direction_mode == 'dual':
-        #     self.V_out = nn.Linear(hidden_dim, hidden_dim, bias=True)
 
 
         self.norm_h = {
@@ -100,7 +108,7 @@ class GNNLayer(nn.Module):
         # Update edge features and compute edge gates
         e_tmp = Ah.unsqueeze(1) + Bh.unsqueeze(2) + Ce  # B x V x V x H
         
-        # === DEEP NAB INJECTION ===
+        # === UPDATE DEEP NAB INJECTION ===
         if deep_nab is not None:
             # Inject the structural wind bias directly into the gating calculation
             e_tmp = e_tmp + deep_nab
@@ -108,7 +116,7 @@ class GNNLayer(nn.Module):
         e = e_tmp # Reassign to 'e' so your normalization and residual code below works seamlessly
         gates = torch.sigmoid(e)  # B x V x V x H
 
-        # ===== Directional Aggregation Logic =====
+        # =====UPPDATE: Directional Aggregation Logic =====
 
         # Helper to prepare Vh for aggregation: (B, V, V, H)
         # Represents feature of 'j' available at 'i'
@@ -130,32 +138,26 @@ class GNNLayer(nn.Module):
             aggr = self.aggregate(Vh, graph.transpose(1, 2), gates.transpose(1, 2))
             
         elif self.gnn_direction_mode == 'dual':
-            # # Bi-directional: Concatenation of Incoming (V) and Outgoing (V_out)  (at first i used sum, but it gave weird results because od annulation of wind costs)  --- CONCATENATION AND LINEAR PROJECTION MODE
+            # In Asymmetric TSP, the cost from A->B is not the cost from B->A.
+            # Here we calculate two separate aggregations:
+            # 1. Incoming (costs to reach node i)
+            # 2. Outgoing (costs to leave node i)
+            # We then fuse them. (NOTE: A simple sum() caused cancellation of wind 
+            # costs during experimentation. A learned projection/fusion works best).
             
-            # 1. Incoming (Standard)
+            # 1. Incoming (Standard V_h over standard graph)
             Vh_in = prepare_Vh(self.V, h)
             aggr_in = self.aggregate(Vh_in, graph, gates)
             
-            # 2. Outgoing (Transposed)
+            # 2. Outgoing (Transposed V_out over transposed graph)
             Vh_out = prepare_Vh(self.V_out, h)
             aggr_out = self.aggregate(Vh_out, graph.transpose(1, 2), gates.transpose(1, 2))
             
-            # NEW: Concatenate and Project
-            # Stack features side-by-side [Batch, Nodes, 2*Hidden]
+            # 3. Concatenate and Project 
+            # Stacks features side-by-side [Batch, Nodes, 2*Hidden] and linearly 
+            # projects back to [Batch, Nodes, Hidden]
             aggr_cat = torch.cat([aggr_in, aggr_out], dim=-1)
-            # Project back to [Batch, Nodes, Hidden]
             aggr = self.project_dual(aggr_cat)
-
-            # Bi-directional: Gated Fusion of Incoming and Outgoing --- GATED FUSION MODE
-
-            # # 3. Gated Fusion
-            # # Stack inputs
-            # concat = torch.cat([aggr_in, aggr_out], dim=-1)
-            # # Calculate Gate z (sigmoid forces it between 0 and 1)
-            # z = torch.sigmoid(self.gate_layer(concat))
-            
-            # # Weighted Sum: If z=1, use Forward. If z=0, use Backward.
-            # aggr = z * aggr_in + (1 - z) * aggr_out
 
             # Original Simple Sum Version (no gating)
             aggr = aggr_in + aggr_out
@@ -223,13 +225,16 @@ class GNNEncoder(nn.Module):
                  learn_norm=True, track_norm=False, gated=True, gnn_direction_mode = 'forward', gnn_deep_bias=False, *args, **kwargs):
         super(GNNEncoder, self).__init__()
 
-        # 1. Keep Legacy Support (Standard TSP uses binary graph 0/1)
+        # --- Base Implementation (Legacy Support) ---
+        # Used for standard Euclidean TSP where the graph is purely binary (edge exists: 0 or 1).
         self.init_embed_edges = nn.Embedding(2, hidden_dim)
         
-        # 2. Add New Support (Windy TSP uses continuous cost values)
+        # --- UPDATE: Continuous Edge Projection ---
+        # Used for Windy TSP. Projects the continuous scalar values of the Cost Matrix 
+        # (or the generated NAB bias) directly into the hidden dimension.
         self.init_lin_edges = nn.Linear(1, hidden_dim)
 
-        # 3. GNN Layer Configurations
+        # GNN Layer Configurations
         self.gnn_deep_bias = gnn_deep_bias
 
         self.layers = nn.ModuleList([
@@ -261,6 +266,11 @@ class GNNEncoder(nn.Module):
             e = self.init_embed_edges(graph.type(torch.long))
 
         # 2. Project Deep NAB if the ablation flag is turned on
+        # UPDATE: Deep NAB Injection
+        # Standard GNNs suffer from "oversmoothing", where edge information 
+        # degrades in deeper layers. If `gnn_deep_bias` is True, we project the 
+        # NAB matrix and explicitly re-inject it into the gating mechanism of 
+        # EVERY layer, enforcing structural asymmetry throughout the network.
         deep_nab = None
         if self.gnn_deep_bias and nab_bias is not None:
             deep_nab = self.init_lin_edges(nab_bias.unsqueeze(-1))

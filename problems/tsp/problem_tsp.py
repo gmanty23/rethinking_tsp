@@ -1,3 +1,21 @@
+"""
+problems/tsp/problem_tsp.py
+
+Environment and Dataset definitions for NCO.
+
+BASE IMPLEMENTATION:
+- Standard Symmetric Euclidean TSP formulations (Kool et al. 2019).
+
+AUTHOR CONTRIBUTIONS (Windy/Asymmetric TSP Extensions):
+- Introduced the `WindyTSP` environment, overriding standard L2 distance with 
+  an asymmetric exponential physics formula.
+- Added `get_wind_knn_graph` to generate directed sparsification masks while 
+  enforcing minimum in-degrees to prevent unreachable nodes.
+- Heavily modified `TSPDataset` to generate and pack a multi-modal "Fat Vector" 
+  (Spatial + Wind + Global Stats + Local Topology) for Asymmetric Node Embeddings (ANE).
+"""
+
+
 from torch.utils.data import Dataset
 import torch
 import os
@@ -80,6 +98,7 @@ def tour_nodes_to_W(tour_nodes):
 
 def get_wind_knn_graph(nodes, neighbors, knn_strat, cost_matrix):
     """
+    UPDATE 
     Calculates Graph Mask based on Asymmetric Cost Matrix (Wind) OR Random Connections.
     Ensures all nodes have a minimum in-degree to maintain reachability.
     """
@@ -133,7 +152,12 @@ def get_wind_knn_graph(nodes, neighbors, knn_strat, cost_matrix):
         for i in range(num_nodes):
             W[i, knn_indices[i]] = 0 
             
-    # --- ENFORCE MINIMUM IN-DEGREE ---
+    # Standard Euclidean kNN guarantees an undirected connection. In Asymmetric 
+    # Windy TSP, if we only connect nodes based on outward costs, some nodes 
+    # might end up with zero incoming edges (in-degree = 0). A valid TSP tour 
+    # is impossible if a node cannot be reached.
+    # This block detects isolated nodes and forcibly opens incoming edges from 
+    # the lowest-cost origins to guarantee theoretical reachability.
     min_in_edges = max(1, int(0.1 * k)) 
     in_degrees = np.sum(W == 0, axis=0)
     isolated_nodes = np.where(in_degrees == 0)[0] 
@@ -174,7 +198,20 @@ class TSP(object):
 
     @staticmethod
     def get_costs(dataset, pi):
-        """Returns TSP tour length for given graph nodes and tour permutations
+        """
+        UPDATE
+
+        Calculates tour cost using directional wind vectors. 
+        Instead of symmetric Euclidean distance, the cost of traveling from 
+        node i to node j is defined as:
+        
+        $$Cost = D_{ij} \cdot \exp(-\alpha (\hat{u} \cdot \vec{w}))$$
+        
+        Where:
+        - D_{ij} is the Euclidean distance.
+        - alpha is the wind intensity multiplier.
+        - \hat{u} is the normalized direction vector from i to j.
+        - \vec{w} is the global wind vector.
         
         Args:
             dataset: graph nodes (torch.Tensor) [Batch, N, 2]
@@ -230,6 +267,8 @@ class TSP(object):
 
 class WindyTSP(TSP):
     """
+    UPDATE 
+
     Class representing the Windy (Asymmetric) TSP.
     Inherits State and Beam Search logic from TSP, but overrides cost calculation.
     """
@@ -346,7 +385,7 @@ class TSPDataset(Dataset):
 
 
         if filename is not None:
-            # === Windy TSP Loading (.pkl) ===
+            # === UPDATE: Windy TSP Loading (.pkl) ===
             if filename.endswith('.pkl'):
                 self.is_windy = True
                 print(f'\nLoading Windy TSP from {filename} with mode {node_feature_type}...')
@@ -373,7 +412,7 @@ class TSPDataset(Dataset):
 
         # === Random Generation ===
         else:
-            # Check problem_type OR feature type to decide generation mode
+            # UPDATE Check problem_type OR feature type to decide generation mode
             if self.problem_type == 'windy_tsp' or node_feature_type in ['learned', 'hybrid', 'blank']:
                 self.is_windy = True
                 print(f'\nGenerating {num_samples} samples of Windy TSP{min_size}-{max_size}...')
@@ -428,11 +467,13 @@ class TSPDataset(Dataset):
             costs = dists * np.exp(-1.0 * alpha * wind_proj)
             np.fill_diagonal(costs, 0)
             
-            # --- THE FEATURE/REWARD SPLIT ---
-            # 2A. The RL Reward (Pure, unscaled exponential physics)
-            norm_costs = costs.copy() 
+            # ---UPDATE: THE FEATURE/REWARD SPLIT ---
+            # 1. norm_costs (Raw Physics): Unscaled, exponential values. This MUST 
+            #    be used as the Ground Truth reward for the RL Critic and REINFORCE loss.
+            # 2. costs_feature_scaled (Log-Compressed): The raw exponential variance 
+            #    will blow up FP16 Attention heads. We apply safe log-compression 
+            #    here strictly for use as input features to the GAT/ANE encoders.
 
-            # --- THE FEATURE/REWARD SPLIT ---
             # 2A. The RL Reward (Pure, unscaled exponential physics)
             norm_costs = costs.copy() 
 
@@ -537,7 +578,11 @@ class TSPDataset(Dataset):
                     else:
                         sampled_costs[i] = np.pad(sorted_costs, (0, k_val - len(sorted_costs)), constant_values=max_scaled_cost)
 
-                # 6. RETRO-COMPATIBLE SUPER-PACKING
+                # 6. UPDATE: RETRO-COMPATIBLE SUPER-PACKING
+                #  "Fat Vector" Feature Assembly
+                # Here we assemble the multi-modal input vector required by the 
+                # Asymmetric Node Embeddings (ANE). 
+                # Structure: [X, Y, Wx, Wy, Alpha] + [Global Stats (8)] + [Local Topology (K)]
                 baseline_features = np.concatenate([
                     loc, wind_repeated, alpha_repeated, 
                     stat_out_mean, stat_in_mean, stat_out_std, stat_in_std, 

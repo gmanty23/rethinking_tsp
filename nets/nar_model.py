@@ -1,3 +1,19 @@
+"""
+nets/nar_model.py
+
+Non-Autoregressive (NAR) Model for TSP.
+
+BASE IMPLEMENTATION ONLY:
+- This file is preserved from the original "Rethinking Generalization" framework
+  (Kool et al., Joshi et al.) to support baseline non-autoregressive decoding.
+  
+ON ASYMMETRY / WINDY TSP:
+- This specific model variant was NOT modified to support the Asymmetric/Windy 
+  TSP extensions (ANE, NAB, explicit cost matrices) introduced in this repository. 
+  It expects standard Euclidean coordinates. For asymmetric routing, use the 
+  default AttentionModel (--model attention).
+"""
+
 import math
 import numpy as np
 

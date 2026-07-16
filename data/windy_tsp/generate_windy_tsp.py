@@ -1,3 +1,20 @@
+"""
+data/windy_tsp/generate_windy_tsp.py
+
+Asymmetric Environment Generator.
+
+UPDATE: whole file
+
+This script generates the foundational datasets for the Windy TSP. 
+Unlike standard TSP datasets which only contain (X, Y) coordinates saved as `.txt` 
+files, this generates a richer `.pkl` dataset containing the coordinates, a global 
+wind vector, and the wind intensity alpha. 
+
+It calculates an explicitly asymmetric cost matrix using an exponential physics 
+formulation to prevent negative edge weights while naturally modeling the 
+difficulty of moving against a headwind.
+"""
+
 import argparse
 import numpy as np
 import os

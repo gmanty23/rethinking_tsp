@@ -1,72 +1,90 @@
 #!/bin/bash
 
-# ==================================================
-# HARDWARE & CONFIGURATION
-# ==================================================
+# ==============================================================================
+# train_ablations.sh
+# UPDATE: whole file
+# Automated Parallel Training Pipeline for Asymmetric/Windy TSP
+# Handles dataset generation, LKH baseline calculations, and concurrent model training.
+# ==============================================================================
+
+
+# --------------------------------------------------
+# 1. HARDWARE & CONCURRENCY CONFIGURATION
+# --------------------------------------------------
 BATCH_SIZE=128
 NUM_WORKERS=6
-MAX_PARALLEL_JOBS=1
+MAX_PARALLEL_JOBS=1 
 
-# --- FIXED EXPERIMENT SETTINGS ---
+
+# --------------------------------------------------
+# 2. FIXED EXPERIMENT SETTINGS
+# --------------------------------------------------
 EPOCHS=100
 PROBLEM="windy_tsp"
 ENTROPY=0.05
-NEIGHBORS=(100) # SAME NUMBER AS RRNCO
+NEIGHBORS=(1) # CRUCIAL: NUST BE BETWEEN 0 AND 1
 
 # Standardized Sizes (Multiples of 128)
 VAL_SIZE=2048      # 16 * 128
 EPOCH_SIZE=128000  # 1000 * 128
 ROLLOUT_SIZE=10240 # 80 * 128
 
-# --- VARIABLES TO TEST ---
-#IMPORTANTISIMO QUE ESTE EN PORCENTAJE QUE YALA HAS LIADO UNA VEZ
+
+# --------------------------------------------------
+# 3. ABLATION GRID (Toggle values to test different architectures)
+# --------------------------------------------------
 GRAPH_SIZES=(100)
 
-# 1. Encoders to test (Format: "ENCODER_TYPE:MODE")
+# Encoders to test (Format: "ENCODER_TYPE:MODE")
+# Small description of each:
+# - gnn:standard: Standard GNN with Layer 0 Initialization, meaning NAB is injected only at the first layer of the GNN encoder
+# - gnn:deep: GNN with Deep NAB Injection, meaning NAB is injected into multiple layers of the GNN encoder
+# - aafm:standard: Asymmetric Attention Feature Modulation (AAFM) encoder, which is an encoder that uses attention mechanisms to modulate features asymmetrically, and requires NAB in the encoder
+# - mlp:standard: Multi-Layer Perceptron (MLP) encoder, which is a simple feedforward neural network that ignores NAB entirely
+# - gat:standard: Graph Attention Network (GAT) encoder, which is a type of GNN that uses attention mechanisms to weigh the importance of neighboring nodes, and can optionally use NAB
+# - edge_gat:standard: Edge-based GAT encoder, which is a variant of GAT that focuses on edge features, and can optionally use NAB
 ENCODERS=(
-    "gnn:deep"         # Method 2: Deep Gate Injection
-    #"gnn:standard"     # Method 1: Layer 0 Initialization
+    "gnn:deep"         # GNN with Deep NAB Injection
+    #"gnn:standard"    # GNN with Layer 0 Initialization
     #"gat:standard"
     #"edge_gat:standard"
     #"aafm:standard"
     #"mlp:standard"
-    #"gnn:standard"     # Method 1: Layer 0 Initialization
 )
 
-# 2. Feature Types (Array format: "NODE_EMBEDDING_TYPE:NODE_FEATURE_TYPE")
+# Feature Types (Array format: "NODE_EMBEDDING_TYPE:NODE_FEATURE_TYPE")
 ABLATIONS=(
-    "original:hybrid"       # (coords+stats)concatenated -> Currently the only one active
-    #"ane_pure:coords"     # (coords+local distances)gated
-    #"ane_hybrid:coords"   # ((coords+local distances)gated+global stats)concatenated
-    #"ane_no_gate:coords"  # (coords+local distances+global stats)concatenated
-    "ane_3way_gate:coords" # (coords+local distances+global stats) gated
-    #"ane_stats_only:coords" # (coords+stats)gated
-
+    "original:hybrid"       # (coords + stats) concatenated
+    #"ane_pure:coords"      # (coords + local distances) gated
+    #"ane_hybrid:coords"    # ((coords + local distances) gated + global stats) concatenated
+    #"ane_no_gate:coords"   # (coords + local distances + global stats) concatenated
+    "ane_3way_gate:coords"  # (coords + local distances + global stats) 3-way softmax gate
+    #"ane_stats_only:coords" # (coords + stats) gated
 )
 
-# 3. NAB Placement Ablations
+# NAB Placement Ablations
 NAB_MODES=(
-    #"none"      # Baseline (Standard Encoder + Standard Decoder)
-    "both"   # NAB injected into Encoder only
-    "decoder"   # NAB injected into Decoder only
-    #"encoder"      # NAB injected into both Encoder and Decoder
+    #"none"         # Baseline (Standard Encoder + Standard Decoder)
+    "both"          # NAB injected into both Encoder and Decoder
+    "decoder"       # NAB injected into Decoder only
+    #"encoder"      # NAB injected into Encoder only
 )
 
-# 4. KNN Strategy Ablations
+# KNN Strategy Ablations
 KNN_STRATS=(
-    #"random_percentage"
-    #"percentage"
-    "cost_weighted_percentage"
+    #"random_percentage"            # Randomly select a percentage of neighbors
+    #"percentage"                   # Select a fixed percentage of neighbors based on distance
+    "cost_weighted_percentage"      # Select neighbors based on a cost-weighted percentage, prioritizing lower-cost edges
 )
 
-# 5. GNN Message Passing Ablations
+# GNN Message Passing Direction
 GNN_DIRECTIONS=(
-    "dual"
-    #"forward"
-    #"backward"
+    "dual"       # Bi-directional fusion (incoming + outgoing)
+    #"forward"   # Standard incoming
+    #"backward"  # Standard outgoing
 )
 
-# 6. NUEVO: Número de capas del GNN Encoder
+# Number of GNN encode layers
 N_LAYERS=(
     #1
     #2
@@ -75,16 +93,21 @@ N_LAYERS=(
     5
 )
 
-# --- PATHS ---
-LOG_DIR="logs_windy_tsp_NAB-CLIPPED-V3_GNN_NEIGHBOURS_ablation"
-OUTPUT_DIR="outputs/NAB-CLIPPED-V3_GNN_NEIGHBOURS_ablation"
-mkdir -p $LOG_DIR
+
+# --------------------------------------------------
+# 4. PATHS & LOGGING SETUP
+# --------------------------------------------------
+EXPERIMENT_NAME="NAB-CLIPPED-V3_GNN_NEIGHBOURS_ablation"
+LOG_DIR="logs_windy_tsp_${EXPERIMENT_NAME}"
+OUTPUT_DIR="outputs/${EXPERIMENT_NAME}"
+
+mkdir -p "$LOG_DIR"
 mkdir -p data/windy_tsp
 mkdir -p results/lkh_windy
-mkdir -p $OUTPUT_DIR
+mkdir -p "$OUTPUT_DIR"
 
 # Master Log File
-LOG_FILE="${LOG_DIR}/tsp_NAB-CLIPPED-V3_GNN_NEIGHBOURS_ablation_study.log"
+LOG_FILE="${LOG_DIR}/${EXPERIMENT_NAME}.log"
 
 # Initialize Log
 echo "==================================================" > "$LOG_FILE"
@@ -102,9 +125,10 @@ echo "  tail -f ${LOG_DIR}/*.log"
 echo "=================================================="
 echo ""
 
-# ==================================================
-# PREPARATION: VALIDATION DATA & LKH BASELINE
-# ==================================================
+
+# --------------------------------------------------
+# 5. PREPARATION: VALIDATION DATA & LKH BASELINE
+# --------------------------------------------------
 for GRAPH_SIZE in "${GRAPH_SIZES[@]}"; do
 
     echo "" | tee -a "$LOG_FILE"
@@ -146,9 +170,9 @@ for GRAPH_SIZE in "${GRAPH_SIZES[@]}"; do
     fi
 done
 
-# ==================================================
-# MAIN EXPERIMENT LOOP (Asynchronous Worker Pool)
-# ==================================================
+# --------------------------------------------------
+# 6. MAIN EXPERIMENT LOOP (Asynchronous Worker Pool)
+# --------------------------------------------------
 for GRAPH_SIZE in "${GRAPH_SIZES[@]}"; do
     VAL_DATA="data/windy_tsp/windy_tsp${GRAPH_SIZE}_val.pkl"
 
@@ -159,19 +183,10 @@ for GRAPH_SIZE in "${GRAPH_SIZES[@]}"; do
                     for STRAT in "${KNN_STRATS[@]}"; do
                         for DIR in "${GNN_DIRECTIONS[@]}"; do
                             for N_LAY in "${N_LAYERS[@]}"; do
-                                # 1. Parse Encoder Configuration
+
+                                # Parse Encoder and Feature Configurations
                                 ENC_TYPE="${ENC_CONF%%:*}"
                                 ENC_MODE="${ENC_CONF##*:}"
-                                
-                                # 2. Parse Feature Configuration
-                                EMB_TYPE="${ABLATION%%:*}"
-                                FEAT_TYPE="${ABLATION##*:}"
-                            for N_LAY in "${N_LAYERS[@]}"; do
-                                # 1. Parse Encoder Configuration
-                                ENC_TYPE="${ENC_CONF%%:*}"
-                                ENC_MODE="${ENC_CONF##*:}"
-                                
-                                # 2. Parse Feature Configuration
                                 EMB_TYPE="${ABLATION%%:*}"
                                 FEAT_TYPE="${ABLATION##*:}"
 
@@ -224,7 +239,7 @@ for GRAPH_SIZE in "${GRAPH_SIZES[@]}"; do
 
                                 # ==========================================
 
-                                # 3. Dynamic Flag Injection for GNNs
+                                # Dynamic Flag Injection for GNNs
                                 DEEP_BIAS_FLAG=""
                                 GNN_DIR_FLAG=""
                                 
@@ -237,7 +252,7 @@ for GRAPH_SIZE in "${GRAPH_SIZES[@]}"; do
                                 fi
                                 
                                 # ACTUALIZADO: El RUN_NAME ahora incluye la dirección de la GNN
-                                RUN_NAME="NAB-CLIPPED-V3_GNN_NEIGHBOURS_${ENC_TYPE}-${ENC_MODE}_${EMB_TYPE}_${FEAT_TYPE}_nab-${NAB_MODE}_tsp${GRAPH_SIZE}_ent${ENTROPY}_neighbors${NEIGHBOR}_strat-${STRAT}_dir-${DIR}_layers-${N_LAY}_emb-${EMB_TYPE}_feat-${FEAT_TYPE}"
+                                RUN_NAME="${EXPERIMENT_NAME}_${ENC_TYPE}-${ENC_MODE}_${EMB_TYPE}_${FEAT_TYPE}_nab-${NAB_MODE}_tsp${GRAPH_SIZE}_ent${ENTROPY}_neighbors${NEIGHBOR}_strat-${STRAT}_dir-${DIR}_layers-${N_LAY}"
                                 RUN_LOG="${LOG_DIR}/${RUN_NAME}.log"
                                     
                                 # SKIP CHECK: Does a folder with this configuration already exist?
@@ -256,6 +271,7 @@ for GRAPH_SIZE in "${GRAPH_SIZES[@]}"; do
                                 echo " -> Launching: Enc=${ENC_TYPE}(${ENC_MODE}) | NAB=${NAB_MODE} | Neigh=${NEIGHBOR} | Strat=${STRAT} | Dir=${DIR} | Layers=${N_LAY} | ANE=${ABLATION} | emb=${EMB_TYPE} | feat=${FEAT_TYPE}" | tee -a "$LOG_FILE"
                                 
                                 # LAUNCH TRAINING IN BACKGROUND
+                                # to add wind to the stats, we need to pass the --node_feature_type argument to the run.py script
                                 python -u run.py \
                                     --problem $PROBLEM \
                                     --min_size $GRAPH_SIZE \

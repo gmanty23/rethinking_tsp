@@ -1,3 +1,18 @@
+"""
+train.py
+
+Main training loop for Reinforcement Learning (and Supervised Learning) NCO models.
+
+BASE IMPLEMENTATION: 
+- REINFORCE algorithm with rollout baseline (Kool et al., "Solving TSP Requires Rethinking Generalization").
+
+CONTRIBUTIONS (Asymmetric / Windy TSP):
+- Injection of explicit `cost_matrix` into the forward pass to support asymmetric edge weights.
+- Entropy regularization to prevent premature convergence in complex windy landscapes.
+- Custom validation logic against asymmetric LKH-3 baselines.
+- Real-time tracking of model "confidence" (average log probability per node).
+"""
+
 import os
 import time
 from tqdm import tqdm
@@ -78,10 +93,13 @@ def rollout(model, dataset, opts):
     
     def eval_model_bat(bat):
         with torch.no_grad():
+            # --- UPDATE: Asymmetric Edge Weights ---
+            # Standard TSP only requires node coordinates. For Windy TSP, we explicitly 
+            # extract the asymmetric cost matrix.
             # Grab the cost matrix if it's available in the batch
             cost_mat = move_to(bat['cost_matrix'], opts.device) if 'cost_matrix' in bat else None
             
-            # Pass cost_matrix to the model
+            # Pass both spatial features (nodes/graph) and directional costs (cost_matrix)
             cost, _ = model(
                 move_to(bat['nodes'], opts.device), 
                 move_to(bat['graph'], opts.device),
@@ -199,7 +217,9 @@ def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_datasets, p
 
     for val_idx, val_dataset in enumerate(val_datasets):
         
-        # --- NEW CODE: Attempt to load LKH Baseline for this dataset ---
+        # --- UPDATE: Asymmetric Baseline Validation ---
+        # Attempt to load exact LKH-3 solver results for the specific Windy TSP dataset.
+        # This provides a rigorous optimality gap calculation for asymmetric problems.
         baseline_cost = None
         try:
             # 1. Get the path of the current validation dataset
@@ -246,6 +266,10 @@ def train_batch(model, optimizer, baseline, epoch,
 
     # Evaluate model, get costs and log probabilities
     with amp.autocast(enabled=True):
+            # --- UPDATE: Asymmetric Forward Pass & Entropy ---
+            # Pass the asymmetric cost matrix deep into the network. 
+            # Optionally return entropy to encourage exploration in Windy TSP landscapes.
+
             # Evaluate model, get costs and log probabilities
             if opts.entropy_coeff > 0:
                 cost, log_likelihood, entropy = model(x, graph, cost_matrix=cost_matrix, return_entropy=True)
@@ -253,10 +277,10 @@ def train_batch(model, optimizer, baseline, epoch,
                 cost, log_likelihood = model(x, graph, cost_matrix=cost_matrix, return_entropy=False)
                 entropy = None
 
-            # --- STATS: Calculate Model Confidence ---
-            # log_likelihood is the sum of log_probs for the tour.
-            # We approximate average probability per node.
-            # (Note: This is an approximation for logging purposes)
+            # --- UPDATE: Model Confidence Tracking ---
+            # Approximate the average probability per node to monitor if the model 
+            # is becoming overconfident early in training.
+            # (This is an approximation for logging purposes)
             avg_log_prob = log_likelihood.mean() / x.size(1) 
             model_confidence = torch.exp(avg_log_prob).item()
             # -----------------------------------------
@@ -264,10 +288,10 @@ def train_batch(model, optimizer, baseline, epoch,
             # Evaluate baseline
             bl_val, bl_loss = baseline.eval(x, graph, cost) if bl_val is None else (bl_val, 0)
 
-            # Calculate loss
+            # Calculate REINFORCE loss
             reinforce_loss = ((cost - bl_val) * log_likelihood).mean()
             
-            # Add Entropy Regularization
+            # --- UPDATE: Entropy Regularization ---
             if entropy is not None:
                 # We want to MAXIMIZE entropy -> MINIMIZE -entropy
                 # So we subtract (coeff * entropy) from the loss
