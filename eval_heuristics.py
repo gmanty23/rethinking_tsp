@@ -16,16 +16,25 @@ from data.windy_tsp.generate_windy_tsp import calculate_cost_matrix
 # =====================================================================
 # LIST OF ALL BASELINES
 # =====================================================================
-# ALL_METHODS = [
-#     'nearest_neighbour', 'farthest_insertion', 
-#     'cheapest_insertion', 'random_insertion', 'multifragment', 
-#     'clarke_wright', 'karp_steele', 'greedy_karp_steele',
-#     'aco', 'simulated_annealing', 'tabu_search', 'grasp', 'vns', 
-#     'genetic_algorithm', 'large_neighborhood_search', 'brkga', 'q_learning'
-#     # 'nearest_insertion', 'grasp', 'bellman_held_karp' # WARNING: O(2^N). Uncomment only for N < 20
-# ]
+# =====================================================================
+# LIST OF ALL BASELINES (Filtered for N=100 compatibility)
+# =====================================================================
 ALL_METHODS = [
-    'nearest_insertion'
+    # done :
+    'nearest_neighbour', 'farthest_insertion', 'cheapest_insertion', 'multifragment', 'clarke_wright', 'karp_steele', 'vns', 
+    'large_neighborhood_search', 'brkga', 'q_learning', 'nearest_insertion', 
+    'random_insertion', 'greedy_karp_steele', 'aco', 'simulated_annealing', 'tabu_search', 'grasp', 'genetic_algorithm'
+    # 'bellman_held_karp' is strictly excluded (runs out of memory/time at N=100)
+    # 'nearest_insertion' 9% (189 instances) in 17h
+    # 'random_insertion' 2% (43 instances) in 2h
+    # 'greedy_karp_steele' 25% (10 instances) in 4:30h
+    # 'aco' 7% (155) in 15 min
+    # 'simulated_annealing' 0.5% (4) in 10 mins
+    # 'tabu_search' 4% (77) in 13 mins
+    # 'grasp' 4% (45) in 30mins
+    # 'genetic_algorithm' 1% (12) in 15 mins
+
+
 ]
 
 def load_windy_dataset(filepath, num_samples=None):
@@ -217,7 +226,7 @@ def main(opts):
     # 3. Determine Methods to Run
     methods_to_run = ALL_METHODS if opts.method.lower() == 'all' else [opts.method]
     
-    csv_filename = os.path.join(opts.output_dir, f"baselines_summary_N{N_nodes}.csv")
+    csv_filename = os.path.join(opts.output_dir, f"baselines_20samples_summary_N{N_nodes}.csv")
     print(f"\nOutput will be appended to: {csv_filename}")
     print(f"Methods scheduled to run: {len(methods_to_run)}\n" + "-"*50)
 
@@ -231,9 +240,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Now accepts "all" to run the entire suite automatically
     parser.add_argument("--method", type=str, default="all", help="Specific method name or 'all' to run every baseline")
-    parser.add_argument("--dataset_path", type=str, default="data/windy_tsp/windy_tsp50_val.pkl")
-    parser.add_argument("--lkh_path", type=str, default="results/lkh_windy/windy_tsp50_val.pkl", help="Path to LKH baseline results")
-    parser.add_argument("--num_samples", type=int, default=2048)
-    parser.add_argument("--output_dir", type=str, default="results/eval_pycombinatorial")
-    parser.add_argument("--max_workers", type=int, default=20)
+    
+    # Updated paths for N=100
+    parser.add_argument("--dataset_path", type=str, default="data/windy_tsp/windy_tsp20_val.pkl")
+    parser.add_argument("--lkh_path", type=str, default="results/lkh_windy/windy_tsp20_val.pkl", help="Path to LKH baseline results")
+    
+    parser.add_argument("--num_samples", type=int, default=20)
+    
+    # Updated output directory
+    parser.add_argument("--output_dir", type=str, default="results/baselines_20")
+    
+    parser.add_argument("--max_workers", type=int, default=10)
     main(parser.parse_args())

@@ -63,9 +63,7 @@ pip install -r requirements.txt
 ```bash
 docker build -t windy-tsp .
 
-docker run --gpus all -it \
-    -v $(pwd):/workspace \
-    windy-tsp
+docker docker run --user $(id -u):$(id -g) --gpus all -it --rm --ipc=host -v $(pwd):/workspace -v /mnt/Data-fast/gms:/mnt/Data-fast/gms windy-tsp-modern:latest bash
 ```
 
 ---

@@ -12,9 +12,9 @@
 
 # 1. Define Paths
 VAL_DATA="data/windy_tsp/windy_tsp100_val.pkl"
-OUT_CSV="results/PAPER_RESULTS/V3-ANE_AAFM_ABLATION.csv"
-LOG_FILE="results/nab_ablation_neighbors.txt" 
-MODEL_DIR="outputs/FINAL_PAPER/V3-ANE_AAFM_ABLATION"
+OUT_CSV="results/PAPER_RESULTS/V3-BEST_MODELS_100.csv"
+LOG_FILE="results/PAPER_RESULTS/V3-BEST_MODELS_100.txt"
+MODEL_DIR="outputs/PAPER_OUTPUTS/1-Benchmarking/best_models/windy_tsp_100-100"
 
 # Ensure output directories exist
 mkdir -p "$(dirname "$OUT_CSV")"

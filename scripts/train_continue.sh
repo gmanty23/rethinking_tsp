@@ -13,8 +13,8 @@
 # --------------------------------------------------
 # 1. HARDWARE & CONCURRENCY CONFIGURATION
 # --------------------------------------------------
-BATCH_SIZE=128
-NUM_WORKERS=6
+BATCH_SIZE=512
+NUM_WORKERS=10
 MAX_PARALLEL_JOBS=1
 
 
@@ -23,7 +23,7 @@ MAX_PARALLEL_JOBS=1
 # --------------------------------------------------
 # Set this to the absolute TOTAL epochs you want the models to reach
 # (e.g., if it ran for 100 and you want 500 more, set this to 600)
-TARGET_TOTAL_EPOCHS=200 
+TARGET_TOTAL_EPOCHS=1000 
 PROBLEM="windy_tsp"
 ENTROPY=0.05
 
@@ -36,20 +36,20 @@ ROLLOUT_SIZE=10240
 # --------------------------------------------------
 # 3. ABLATION GRID (Must match the architecture you are trying to resume)
 # --------------------------------------------------
-GRAPH_SIZES=(100)
-NEIGHBORS=(1)     # CRUCUAL: Must be between 0 and 1
+GRAPH_SIZES=(50 20)
+NEIGHBORS=(100)     # CRUCUAL: Must be between 0 and 1
 
 ENCODERS=(
-    "gnn:deep"         # GNN with Deep NAB Injection
+    #"gnn:deep"         # GNN with Deep NAB Injection
     #"gnn:standard"    # GNN with Layer 0 Initialization
     #"gat:standard"
     #"edge_gat:standard"
-    #"aafm:standard"
+    "aafm:standard"
     #"mlp:standard"
 )
 
 ABLATIONS=(
-    "original:hybrid"       
+    #"original:hybrid"       
     #"ane_pure:coords"      
     #"ane_hybrid:coords"     
     #"ane_no_gate:coords"   
@@ -60,7 +60,7 @@ ABLATIONS=(
 NAB_MODES=(
     #"none"         
     "both"          
-    "decoder"       
+    #"decoder"       
     #"encoder"      
 )
 
@@ -79,19 +79,19 @@ GNN_DIRECTIONS=(
 N_LAYERS=(
     #1
     #2
-    #3
-    4
-    5
+    3
+    #4
+    #5
 )
 
 
 # --------------------------------------------------
 # 4. PATHS & LOGGING SETUP
 # --------------------------------------------------
-EXPERIMENT_NAME="NAB-CLIPPED-V3_GNN_NEIGHBOURS_ablation"
+EXPERIMENT_NAME="NAB-CLIPPED-V3_FINAL_ablation"
 LOG_DIR="logs_windy_tsp_${EXPERIMENT_NAME}_resume"
-BASE_OUTPUT_DIR="outputs/${EXPERIMENT_NAME}"
-NEW_OUTPUT_DIR="outputs/${EXPERIMENT_NAME}_resumed"
+BASE_OUTPUT_DIR="outputs/PAPER_OUTPUTS/1-Benchmarking/best_models/${EXPERIMENT_NAME}"
+NEW_OUTPUT_DIR="outputs/PAPER_OUTPUTS/1-Benchmarking/best_models/${EXPERIMENT_NAME}_resumed"
 
 mkdir -p "$LOG_DIR"
 mkdir -p "$NEW_OUTPUT_DIR"
@@ -136,6 +136,15 @@ for GRAPH_SIZE in "${GRAPH_SIZES[@]}"; do
                                 if [ "$ENC_TYPE" == "aafm" ] && [ "$CURRENT_NAB_MODE" == "decoder" ]; then
                                     echo "    [Skip] AAFM with decoder NAB is not supported. Skipping." | tee -a "$LOG_FILE"
                                     continue
+                                fi
+
+                                                                # Check 2.5: ONLY FOR TSP SIZES ABLATION: make mlp force the nab mode to 'decoder'
+                                if [ "$ENC_TYPE" == "mlp" ]; then
+                                    if [ "$NAB_MODE" == "encoder" ] || [ "$NAB_MODE" == "both" ]; then
+                                        echo "    [Override] MLP ignores Encoder NAB. Forcing nab_mode=decoder for $ENC_TYPE." | tee -a "$LOG_FILE"
+                                        # Brute-force change the variable for this specific run
+                                        NAB_MODE="decoder" 
+                                    fi
                                 fi
 
                                 if [ "$ENC_TYPE" == "aafm" ]; then
@@ -218,9 +227,8 @@ for GRAPH_SIZE in "${GRAPH_SIZES[@]}"; do
                                 echo " -> Resuming on GPU ${TARGET_GPU}: ${ENC_TYPE}(${ENC_MODE}) | Layers=${N_LAY} | From Epoch $CURRENT_EPOCH (Running $EPOCHS_TO_RUN more)" | tee -a "$LOG_FILE"
                                 
                                 # 7. LAUNCH RESUME COMMAND
-                                CUDA_VISIBLE_DEVICES=$TARGET_GPU python -u run.py \
+                                python -u run.py \
                                     --problem $PROBLEM \
-                                    --use_wind \
                                     --min_size $GRAPH_SIZE \
                                     --max_size $GRAPH_SIZE \
                                     --n_epochs $EPOCHS_TO_RUN \

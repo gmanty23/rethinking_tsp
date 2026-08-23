@@ -11,18 +11,18 @@
 # --------------------------------------------------
 # 1. HARDWARE & CONCURRENCY CONFIGURATION
 # --------------------------------------------------
-BATCH_SIZE=128
-NUM_WORKERS=6
-MAX_PARALLEL_JOBS=1 
+BATCH_SIZE=512
+NUM_WORKERS=10
+MAX_PARALLEL_JOBS=2
 
 
 # --------------------------------------------------
 # 2. FIXED EXPERIMENT SETTINGS
 # --------------------------------------------------
-EPOCHS=100
+EPOCHS=200 #AQUI 100
 PROBLEM="windy_tsp"
 ENTROPY=0.05
-NEIGHBORS=(1) # CRUCIAL: NUST BE BETWEEN 0 AND 1
+NEIGHBORS=(100) # CRUCIAL: NUST BE BETWEEN 0 AND 1
 
 # Standardized Sizes (Multiples of 128)
 VAL_SIZE=2048      # 16 * 128
@@ -33,7 +33,7 @@ ROLLOUT_SIZE=10240 # 80 * 128
 # --------------------------------------------------
 # 3. ABLATION GRID (Toggle values to test different architectures)
 # --------------------------------------------------
-GRAPH_SIZES=(100)
+GRAPH_SIZES=(50 20) #aqui 100
 
 # Encoders to test (Format: "ENCODER_TYPE:MODE")
 # Small description of each:
@@ -44,17 +44,20 @@ GRAPH_SIZES=(100)
 # - gat:standard: Graph Attention Network (GAT) encoder, which is a type of GNN that uses attention mechanisms to weigh the importance of neighboring nodes, and can optionally use NAB
 # - edge_gat:standard: Edge-based GAT encoder, which is a variant of GAT that focuses on edge features, and can optionally use NAB
 ENCODERS=(
-    "gnn:deep"         # GNN with Deep NAB Injection
+    #"gnn:deep"         # GNN with Deep NAB Injection
     #"gnn:standard"    # GNN with Layer 0 Initialization
     #"gat:standard"
     #"edge_gat:standard"
-    #"aafm:standard"
+    "aafm:standard"
     #"mlp:standard"
 )
 
 # Feature Types (Array format: "NODE_EMBEDDING_TYPE:NODE_FEATURE_TYPE")
 ABLATIONS=(
-    "original:hybrid"       # (coords + stats) concatenated
+    #"original:topo"         # (local neighborhood distances only)
+    #"original:coords"       # (coords)
+    #"original:learned"      # (stats)
+    #"original:hybrid"       # (coords + stats) concatenated
     #"ane_pure:coords"      # (coords + local distances) gated
     #"ane_hybrid:coords"    # ((coords + local distances) gated + global stats) concatenated
     #"ane_no_gate:coords"   # (coords + local distances + global stats) concatenated
@@ -62,15 +65,15 @@ ABLATIONS=(
     #"ane_stats_only:coords" # (coords + stats) gated
 )
 
-# NAB Placement Ablations
+# NAB (Neural Adaptive Bias) Placement Ablations
 NAB_MODES=(
     #"none"         # Baseline (Standard Encoder + Standard Decoder)
     "both"          # NAB injected into both Encoder and Decoder
-    "decoder"       # NAB injected into Decoder only
+    #"decoder"       # NAB injected into Decoder only
     #"encoder"      # NAB injected into Encoder only
 )
 
-# KNN Strategy Ablations
+# Graph Sparification Strategy Ablations
 KNN_STRATS=(
     #"random_percentage"            # Randomly select a percentage of neighbors
     #"percentage"                   # Select a fixed percentage of neighbors based on distance
@@ -88,23 +91,32 @@ GNN_DIRECTIONS=(
 N_LAYERS=(
     #1
     #2
-    #3
-    4
-    5
+    3
+    #4
+    #5
 )
 
 
 # --------------------------------------------------
 # 4. PATHS & LOGGING SETUP
 # --------------------------------------------------
-EXPERIMENT_NAME="NAB-CLIPPED-V3_GNN_NEIGHBOURS_ablation"
+EXPERIMENT_NAME="NAB-CLIPPED-V3_FINAL_ablation"
 LOG_DIR="logs_windy_tsp_${EXPERIMENT_NAME}"
 OUTPUT_DIR="outputs/${EXPERIMENT_NAME}"
 
-mkdir -p "$LOG_DIR"
-mkdir -p data/windy_tsp
-mkdir -p results/lkh_windy
+# Define the base path of your external hard drive
+HDD_BASE="/mnt/Data-fast/gms"
+
+# 1. Create the LOGS and OUTPUTS folders directly on the external hard drive
+mkdir -p "${HDD_BASE}/${LOG_DIR}"
+# (Since 'outputs' and 'results' are already symlinks, standard mkdir will automatically write to the HDD)
 mkdir -p "$OUTPUT_DIR"
+mkdir -p results/lkh_windy
+mkdir -p data/windy_tsp
+
+# 2. Force the creation of the symbolic link for the new logs folder in the local directory
+# (Using -sfn to safely overwrite the link if you relaunch the script)
+ln -sfn "${HDD_BASE}/${LOG_DIR}" "./${LOG_DIR}"
 
 # Master Log File
 LOG_FILE="${LOG_DIR}/${EXPERIMENT_NAME}.log"
@@ -202,6 +214,15 @@ for GRAPH_SIZE in "${GRAPH_SIZES[@]}"; do
                                     fi
                                 fi
                                 
+                                # Check 2.5: ONLY FOR TSP SIZES ABLATION: make mlp force the nab mode to 'decoder'
+                                if [ "$ENC_TYPE" == "mlp" ]; then
+                                    if [ "$NAB_MODE" == "encoder" ] || [ "$NAB_MODE" == "both" ]; then
+                                        echo "    [Override] MLP ignores Encoder NAB. Forcing nab_mode=decoder for $ENC_TYPE." | tee -a "$LOG_FILE"
+                                        # Brute-force change the variable for this specific run
+                                        NAB_MODE="decoder" 
+                                    fi
+                                fi
+
                                 # Check 3: MLP ignores Encoder NAB
                                 if [ "$ENC_TYPE" == "mlp" ]; then
                                     if [ "$NAB_MODE" == "encoder" ] || [ "$NAB_MODE" == "both" ]; then
@@ -209,6 +230,8 @@ for GRAPH_SIZE in "${GRAPH_SIZES[@]}"; do
                                         continue
                                     fi
                                 fi
+
+                                
 
                                 # Check 4: GNN Deep is identical to GNN Standard if Encoder doesn't get NAB
                                 if [ "$ENC_TYPE" == "gnn" ] && [ "$ENC_MODE" == "deep" ]; then

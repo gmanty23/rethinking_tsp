@@ -249,6 +249,8 @@ class AttentionModel(nn.Module):
                 node_dim = NUM_STATS
             elif self.node_feature_type == 'coords':
                 node_dim = self.spatial_dim
+            elif self.node_feature_type == 'topo':
+                node_dim = self.k_neighbors
             else:
                 node_dim = 0
 
@@ -593,6 +595,8 @@ class AttentionModel(nn.Module):
             features = nodes[..., 5:13] 
         elif self.node_feature_type == 'hybrid':
             features = torch.cat((spatial_features, nodes[..., 5:13]), dim=-1)
+        elif self.node_feature_type == 'topo':
+            features = nodes[..., 13 : 13 + self.k_neighbors]
         else: # coords
             features = spatial_features
 

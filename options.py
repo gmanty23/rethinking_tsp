@@ -72,8 +72,8 @@ def get_options(args=None):
                                 "'ane_no_gate' (coords+local distances+global stats)concatenated); "
                                 "'ane_3way_gate' (coords+local distances+global stats) gated; "
                                 "'ane_stats_only' (coords+stats)gated"))
-    model_grp.add_argument('--node_feature_type', type=str, default='coords', choices=['coords', 'learned', 'hybrid', 'blank'],
-                        help="Feature type for Windy TSP: 'coords' (x,y), 'learned' (stats), 'hybrid' (both), or 'blank' (learned completely from blank parameter).")
+    model_grp.add_argument('--node_feature_type', type=str, default='coords', choices=['coords', 'learned', 'hybrid', 'blank', 'topo'],
+                        help="Feature type for Windy TSP: 'coords' (x,y), 'learned' (stats), 'hybrid' (both), 'blank' (learned completely from blank parameter), or 'topo' (local neighborhood sampling only).")
     model_grp.add_argument('--gnn_direction_mode', type=str, default='forward', choices=['forward', 'backward', 'dual'],
                         help="Directional aggregation for GNN (vital for asymmetric edges): 'forward', 'backward', 'dual'.")
     model_grp.add_argument('--nab_mode', type=str, default='none', choices=['none', 'encoder', 'decoder', 'both', 'aafm'],
